@@ -1,0 +1,16 @@
+# SONAME	binary-package	observed-path	status
+libEGL.so.1	libegl1	/usr/lib/arm-linux-gnueabihf/libEGL.so.1.1.0	16K-BAD
+libGL.so.1	libgl1	/usr/lib/arm-linux-gnueabihf/libGL.so.1.7.0	16K-BAD
+libGLX.so.0	libglx0	/usr/lib/arm-linux-gnueabihf/libGLX.so.0.0.0	16K-BAD
+libLLVM.so.19.1	libllvm19	/usr/lib/arm-linux-gnueabihf/libLLVM.so.19.1	16K-BAD
+libXau.so.6	libxau6	/usr/lib/arm-linux-gnueabihf/libXau.so.6.0.0	16K-BAD
+libbsd.so.0	libbsd0	/usr/lib/arm-linux-gnueabihf/libbsd.so.0.12.2	16K-BAD
+libelf.so.1	libelf1t64	/usr/lib/arm-linux-gnueabihf/libelf-0.192.so	16K-BAD
+libxcb-dri3.so.0	libxcb-dri3-0	/usr/lib/arm-linux-gnueabihf/libxcb-dri3.so.0.1.0	16K-BAD
+libxcb-present.so.0	libxcb-present0	/usr/lib/arm-linux-gnueabihf/libxcb-present.so.0.0.0	16K-BAD
+libxcb-randr.so.0	libxcb-randr0	/usr/lib/arm-linux-gnueabihf/libxcb-randr.so.0.1.0	16K-BAD
+libxcb-shm.so.0	libxcb-shm0	/usr/lib/arm-linux-gnueabihf/libxcb-shm.so.0.0.0	16K-BAD
+libxcb-sync.so.1	libxcb-sync1	/usr/lib/arm-linux-gnueabihf/libxcb-sync.so.1.0.0	16K-BAD
+libxcb-xfixes.so.0	libxcb-xfixes0	/usr/lib/arm-linux-gnueabihf/libxcb-xfixes.so.0.0.0	16K-BAD
+libxcb.so.1	libxcb1	/usr/lib/arm-linux-gnueabihf/libxcb.so.1.1.0	16K-BAD
+libz.so.1	zlib1g	/usr/lib/arm-linux-gnueabihf/libz.so.1.3.1	16K-BAD
