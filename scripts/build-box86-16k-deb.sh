@@ -37,11 +37,14 @@ done
 
 rm -rf "$SRC/debian"
 cp -a "$ROOT/packaging/box86-16k/debian" "$SRC/debian"
-mkdir -p "$SRC/tests/box86-16k"
+mkdir -p "$SRC/tests/box86-16k" "$SRC/scripts" "$SRC/armhf16k"
 cp "$ROOT/tests/box86-16k/make_elf32_16k_fixture.py" "$SRC/tests/box86-16k/"
 cp "$ROOT/tests/box86-16k/test_16k_elfloader.sh" "$SRC/tests/box86-16k/"
 cp "$ROOT/tests/box86-16k/test_steam_16k.sh" "$SRC/tests/box86-16k/"
 cp "$ROOT/tests/box86-16k/test_mapping_model.py" "$SRC/tests/box86-16k/"
+cp "$ROOT/scripts/armhf16k-audit.py" "$SRC/scripts/"
+cp "$ROOT/armhf16k/manifest.tsv" "$SRC/armhf16k/"
+cp "$ROOT/armhf16k/baseline-debian13-pi5.tsv" "$SRC/armhf16k/"
 
 sed -i "1s/([^)]*)/($VERSION)/" "$SRC/debian/changelog"
 
