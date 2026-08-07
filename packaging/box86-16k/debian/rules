@@ -30,6 +30,10 @@ override_dh_auto_install:
 	install -Dm755 debian/box86-16k-tools/steam16k debian/box86-16k/usr/bin/steam16k
 	install -Dm755 debian/box86-16k-tools/box86-16k-status debian/box86-16k/usr/bin/box86-16k-status
 	install -Dm644 debian/box86-16k-tools/box86-binfmt.conf debian/box86-16k/etc/binfmt.d/box86.conf
+	# Keep NO_CONF_INSTALL for a private runtime layout, but install Box86's
+	# standard rc database explicitly. Steam depends on its [steam] profile
+	# (BOX86_NOGTK, strongmem, callret and emulated-library overrides).
+	install -Dm644 system/box86.box86rc debian/box86-16k/etc/box86.box86rc
 	install -Dm755 tests/box86-16k/test_16k_elfloader.sh debian/box86-16k/usr/lib/box86-16k/tests/test_16k_elfloader.sh
 	install -Dm755 tests/box86-16k/test_steam_16k.sh debian/box86-16k/usr/lib/box86-16k/tests/test_steam_16k.sh
 	install -Dm755 tests/box86-16k/test_mapping_model.py debian/box86-16k/usr/lib/box86-16k/tests/test_mapping_model.py
