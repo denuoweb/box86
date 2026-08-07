@@ -2,7 +2,7 @@ Source: box86-16k
 Section: utils
 Priority: optional
 Maintainer: DenuoWeb <5424250+denuoweb@users.noreply.github.com>
-Build-Depends: debhelper-compat (= 13), cmake, make, python3, gcc-arm-linux-gnueabihf, libc6-dev-armhf-cross
+Build-Depends: debhelper-compat (= 13), cmake:native, make:native, python3:native, gcc-arm-linux-gnueabihf, libc6-dev-armhf-cross
 Standards-Version: 4.6.2
 Homepage: https://github.com/denuoweb/box86
 Rules-Requires-Root: no
@@ -13,6 +13,6 @@ Multi-Arch: foreign
 Depends: ${misc:Depends}, ${shlibs:Depends}, libc6
 Description: Box86 with non-4K host-page support for Raspberry Pi 5
  Box86 userspace i386 emulator patched to load 4K-aligned ELF32 PT_LOAD
- segments correctly on hosts with 16K pages. Includes a Raspberry Pi 5
- arm64/armhf build profile, replacement binfmt rule, Steam launcher, and
- synthetic 16K ELF regression test.
+ segments correctly on hosts with 16K pages. Builds on Raspberry Pi 5
+ arm64 using Box86's existing ARMv8-A/armhf profile and includes a
+ replacement binfmt rule, Steam launcher, and synthetic 16K ELF test.
