@@ -26,4 +26,4 @@ done
 $SUDO apt-get install -y "${ARGS[@]}"
 
 echo
-"$ROOT/scripts/armhf16k-audit.py" --bad-only --fail-on-bad
+python3 "$ROOT/scripts/armhf16k-audit.py" --bad-only --fail-on-bad
