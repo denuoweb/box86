@@ -1,8 +1,10 @@
-box86-16k (0.3.8+git20260807.0579f8b+16k1) unstable; urgency=medium
+box86-16k (0.3.8+git20260807.0579f8b+16k2) unstable; urgency=medium
 
   * Port Box64 non-4K ELF32 loader handling to Box86.
   * Handle i386 4K mprotect requests on larger host pages.
-  * Add Raspberry Pi 5 arm64/armhf build profile.
+  * Build on Raspberry Pi 5 using Box86's existing RPI4ARM64 ARMv8-A/armhf profile.
   * Add 16K synthetic ELF and Steam regression tests.
+  * Drop the unnecessary custom RPI5ARM64 CMake patch after validating that the
+    existing ARMv8-A profile is compatible with Cortex-A76 and avoids patch drift.
 
- -- DenuoWeb <5424250+denuoweb@users.noreply.github.com>  Fri, 07 Aug 2026 03:33:00 -0700
+ -- DenuoWeb <5424250+denuoweb@users.noreply.github.com>  Fri, 07 Aug 2026 10:10:00 -0700
