@@ -8,7 +8,7 @@ export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 override_dh_auto_configure:
 	dh_auto_configure --builddirectory=debian/build -- \
 		-DCMAKE_BUILD_TYPE=RelWithDebInfo \
-		-DRPI5ARM64=1 \
+		-DRPI4ARM64=1 \
 		-DARM_DYNAREC=1 \
 		-DNOGIT=1 \
 		-DNO_LIB_INSTALL=1 \
