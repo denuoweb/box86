@@ -27,11 +27,11 @@ while IFS=$'\t' read -r stage source binaries; do
     echo "ARMHF16K stage $stage: $source"
     echo "Observed bad binary packages: $binaries"
     echo "============================================================"
-    "$ROOT/scripts/armhf16k-rebuild-source.sh" "$source"
+    bash "$ROOT/scripts/armhf16k-rebuild-source.sh" "$source"
 
     if [[ -n "$STOP_AFTER" && "$source" == "$STOP_AFTER" ]]; then
         break
     fi
 done < "$MANIFEST"
 
-"$ROOT/scripts/armhf16k-make-repo.sh"
+bash "$ROOT/scripts/armhf16k-make-repo.sh"
