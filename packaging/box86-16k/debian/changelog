@@ -1,4 +1,4 @@
-box86-16k (0.3.8+git20260807.0579f8b+16k3) unstable; urgency=medium
+box86-16k (0.3.8+git20260807.0579f8b+16k4) unstable; urgency=medium
 
   * Port Box64 non-4K ELF32 loader handling to Box86.
   * Handle i386 4K mprotect requests on larger host pages.
@@ -9,5 +9,7 @@ box86-16k (0.3.8+git20260807.0579f8b+16k3) unstable; urgency=medium
   * Fix Debian arm64-to-armhf cross-build handling by marking native build tools
     explicitly and bypassing dpkg's misleading host-architecture dependency check
     after the builder has verified the required native and ARMHF toolchains.
+  * Declare box86-16k as a Conflicts/Replaces successor to the legacy
+    box86-steam16k package so upgrades can replace its binfmt file cleanly.
 
- -- DenuoWeb <5424250+denuoweb@users.noreply.github.com>  Fri, 07 Aug 2026 10:48:00 -0700
+ -- DenuoWeb <5424250+denuoweb@users.noreply.github.com>  Fri, 07 Aug 2026 13:43:00 -0700
