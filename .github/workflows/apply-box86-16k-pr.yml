@@ -1,0 +1,46 @@
+name: Apply Box86 16K patches from PR
+
+on:
+  pull_request:
+    branches:
+      - master
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: write
+
+jobs:
+  apply-source-patches:
+    if: ${{ github.head_ref == 'box86-16k' && !contains(github.event.pull_request.head.label, '[16k-source-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out 16K branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: box86-16k
+
+      - name: Apply and verify patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply --check patches/16k/0001-elfloader-non4k-host-pages.patch
+          git apply --check patches/16k/0002-mprotect-4k-guest-on-large-host.patch
+          git apply --check patches/16k/0003-rpi5-arm64-build-profile.patch
+          git apply patches/16k/0001-elfloader-non4k-host-pages.patch
+          git apply patches/16k/0002-mprotect-4k-guest-on-large-host.patch
+          git apply patches/16k/0003-rpi5-arm64-build-profile.patch
+          git diff --check
+
+      - name: Commit source changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CMakeLists.txt src/elfs/elfloader.c src/wrapped/wrappedlibc.c
+          git commit -m "[16K] Apply Pi 5 large-page runtime fixes [16k-source-applied]"
+          git push origin HEAD:box86-16k
