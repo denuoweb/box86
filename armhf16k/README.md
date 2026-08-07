@@ -47,7 +47,7 @@ Several important ARMHF components were already 16K-compatible and are intention
 The builder is intended to run on Debian 13 arm64 with ARMHF enabled:
 
 ```bash
-./scripts/armhf16k-bootstrap-debian13.sh
+bash scripts/armhf16k-bootstrap-debian13.sh
 ```
 
 Debian source repositories (`deb-src`) must be enabled. The bootstrap checks this and stops rather than silently building from unrelated sources.
@@ -55,13 +55,13 @@ Debian source repositories (`deb-src`) must be enabled. The bootstrap checks thi
 ## Audit the installed ARMHF closure
 
 ```bash
-./scripts/armhf16k-audit.py --bad-only
+python3 scripts/armhf16k-audit.py --bad-only
 ```
 
 To make incompatibility a failing test:
 
 ```bash
-./scripts/armhf16k-audit.py --bad-only --fail-on-bad
+python3 scripts/armhf16k-audit.py --bad-only --fail-on-bad
 ```
 
 The default roots are GL, GLX, Mesa GLX, EGL, Mesa EGL, GLdispatch, and GBM. Dependencies are followed recursively through `DT_NEEDED` using ARMHF paths from `ldconfig`.
@@ -69,7 +69,7 @@ The default roots are GL, GLX, Mesa GLX, EGL, Mesa EGL, GLdispatch, and GBM. Dep
 ## Rebuild the full incompatible source set
 
 ```bash
-./scripts/armhf16k-build-all.sh
+bash scripts/armhf16k-build-all.sh
 ```
 
 Each source package is downloaded from the configured Debian source repositories, cross-build dependencies are resolved for `armhf`, a local `+16k1` Debian revision is created, and the source is cross-built with the 16K linker policy.
@@ -83,9 +83,9 @@ armhf16k/repo/pool/
 Useful controls:
 
 ```bash
-ONLY_SOURCE=zlib ./scripts/armhf16k-build-all.sh
-START_AT=libxcb ./scripts/armhf16k-build-all.sh
-STOP_AFTER=elfutils ./scripts/armhf16k-build-all.sh
+ONLY_SOURCE=zlib bash scripts/armhf16k-build-all.sh
+START_AT=libxcb bash scripts/armhf16k-build-all.sh
+STOP_AFTER=elfutils bash scripts/armhf16k-build-all.sh
 ```
 
 `llvm-toolchain-19` is intentionally late in the build because it is much larger than the other source packages.
@@ -95,8 +95,8 @@ STOP_AFTER=elfutils ./scripts/armhf16k-build-all.sh
 `armhf16k-build-all.sh` creates the repository index automatically after a complete run. It can also be regenerated directly:
 
 ```bash
-./scripts/armhf16k-make-repo.sh
-./scripts/armhf16k-enable-repo.sh
+bash scripts/armhf16k-make-repo.sh
+bash scripts/armhf16k-enable-repo.sh
 ```
 
 The repository is a flat local APT repository marked trusted because it is generated locally from Debian source packages. It does not replace or modify upstream repository configuration.
@@ -104,7 +104,7 @@ The repository is a flat local APT repository marked trusted because it is gener
 ## Install the rebuilt runtime packages
 
 ```bash
-./scripts/armhf16k-install-targets.sh
+bash scripts/armhf16k-install-targets.sh
 ```
 
 The installer requests only the binary packages observed as incompatible. APT resolves same-source exact-version dependencies from the local repository when required. After installation, the recursive auditor runs again and fails if any GL/EGL closure library is still 16K-incompatible.
