@@ -1,0 +1,133 @@
+From: box86-16k contributors
+Subject: [PATCH 2/2] LIBC: emulate 4K guest mprotect on larger host pages
+
+An i386 process uses 4K page semantics even when Box86 itself is running on
+a kernel with 16K pages.  Passing a 4K-aligned-but-not-16K-aligned address
+directly to host mprotect(2) returns EINVAL.
+
+Round the actual syscall to host pages, preserve permissions required by the
+neighbouring guest sub-pages on partial first/last host pages, and keep the
+Box86 protection/dynarec maps synchronized with the effective host mapping.
+
+This follows the non-4K strategy added to Box64 in
+9c11c5671c6d385357321856ff75894afab4ee5f.
+---
+ src/wrapped/wrappedlibc.c | 98 +++++++++++++++++++++++++++++++++++++--------
+ 1 file changed, 80 insertions(+), 18 deletions(-)
+
+diff --git a/src/wrapped/wrappedlibc.c b/src/wrapped/wrappedlibc.c
+index fa6dc2e..16c0002 100644
+--- a/src/wrapped/wrappedlibc.c
++++ b/src/wrapped/wrappedlibc.c
+@@ -3290,31 +3290,93 @@ EXPORT int my_munmap(x86emu_t* emu, void* addr, unsigned long length)
+     return ret;
+ }
+ 
++#define BOX86_X86_PAGE_SIZE 4096UL
++
++static int box86_host_mprotect(uintptr_t addr, size_t len, int prot)
++{
++    int ret = mprotect((void*)addr, len, prot);
++    if(ret || !len)
++        return ret;
++
++#ifdef DYNAREC
++    if(box86_dynarec) {
++        if(prot & PROT_EXEC)
++            addDBFromAddressRange(addr, len);
++        else
++            cleanDBFromAddressRange(addr, len, 1);
++    }
++#endif
++    if(prot)
++        updateProtection(addr, len, prot);
++    else {
++        freeProtection(addr, len);
++        setProtection_mmap(addr, len, prot);
++    }
++    return 0;
++}
++
+ EXPORT int my_mprotect(x86emu_t* emu, void *addr, unsigned long len, int prot)
+ {
+     (void)emu;
+     dynarec_log(LOG_DEBUG, "mprotect(%p, %lu, 0x%x)\n", addr, len, prot);
+-    if(prot&PROT_WRITE) 
++    if(prot&PROT_WRITE)
+         prot|=PROT_READ;    // PROT_READ is implicit with PROT_WRITE on i386
+-    int ret = mprotect(addr, len, prot);
+-    #ifdef DYNAREC
+-    if(box86_dynarec && len) {
+-        if(prot& PROT_EXEC)
+-            addDBFromAddressRange((uintptr_t)addr, len);
+-        else
+-            cleanDBFromAddressRange((uintptr_t)addr, len, 1);
++
++    uintptr_t start = (uintptr_t)addr;
++
++    /* Preserve normal behaviour on a normal 4K host. */
++    if(box86_pagesize == BOX86_X86_PAGE_SIZE)
++        return box86_host_mprotect(start, len, prot);
++
++    /* Linux/i386 requires the guest address itself to be guest-page aligned. */
++    if(start & (BOX86_X86_PAGE_SIZE - 1)) {
++        errno = EINVAL;
++        return -1;
+     }
+-    #endif
+-    if(!ret && len) {
+-        if(prot)
+-            updateProtection((uintptr_t)addr, len, prot);
+-        else {
+-            // avoid allocating detailled protection for a no prot 0
+-            freeProtection((uintptr_t)addr, len);
+-            setProtection_mmap((uintptr_t)addr, len, prot);
+-        }
++    if(!len)
++        return 0;
++
++    uintptr_t end = start + len;
++    if(end < start) {
++        errno = ENOMEM;
++        return -1;
++    }
++    end = (end + BOX86_X86_PAGE_SIZE - 1) & ~(BOX86_X86_PAGE_SIZE - 1);
++
++    uintptr_t host_start = start & ~(box86_pagesize - 1);
++    uintptr_t host_end = (end + box86_pagesize - 1) & ~(box86_pagesize - 1);
++
++    /*
++     * When the whole request is inside one host page, Linux can only apply
++     * one protection to that page.  Keep permissions required by neighbouring
++     * 4K guest regions rather than accidentally revoking them.
++     */
++    if(host_end - host_start == box86_pagesize &&
++       (start != host_start || end != host_end)) {
++        int host_prot = prot | (getProtection(host_start) & ~PROT_CUSTOM);
++        return box86_host_mprotect(host_start, box86_pagesize, host_prot);
+     }
+-    return ret;
++
++    /* Partial first host page. */
++    if(start != host_start) {
++        int host_prot = prot | (getProtection(host_start) & ~PROT_CUSTOM);
++        if(box86_host_mprotect(host_start, box86_pagesize, host_prot))
++            return -1;
++        host_start += box86_pagesize;
++    }
++
++    /* Partial last host page. */
++    if(end != host_end) {
++        host_end -= box86_pagesize;
++        int host_prot = prot | (getProtection(host_end) & ~PROT_CUSTOM);
++        if(box86_host_mprotect(host_end, box86_pagesize, host_prot))
++            return -1;
++    }
++
++    if(host_start == host_end)
++        return 0;
++
++    return box86_host_mprotect(host_start, host_end - host_start, prot);
+ }
+ 
+ #ifndef ANDROID

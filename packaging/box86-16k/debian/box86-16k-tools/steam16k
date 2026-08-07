@@ -1,0 +1,31 @@
+#!/bin/sh
+set -eu
+
+STEAM_RUNTIME_BIN=${STEAM_RUNTIME_BIN:-}
+LOCAL_STEAM_SH="$HOME/.local/share/Steam/steam.sh"
+SYSTEM_STEAM_BIN=/usr/bin/steam
+SYSTEM_STEAM_GAMES=/usr/games/steam
+
+if [ -z "$STEAM_RUNTIME_BIN" ] || [ "$STEAM_RUNTIME_BIN" = /usr/bin/steam16k ]; then
+    if [ -x "$LOCAL_STEAM_SH" ]; then
+        STEAM_RUNTIME_BIN=$LOCAL_STEAM_SH
+    elif [ -x "$SYSTEM_STEAM_BIN" ]; then
+        STEAM_RUNTIME_BIN=$SYSTEM_STEAM_BIN
+    elif [ -x "$SYSTEM_STEAM_GAMES" ]; then
+        STEAM_RUNTIME_BIN=$SYSTEM_STEAM_GAMES
+    else
+        echo "Steam executable not found." >&2
+        exit 1
+    fi
+fi
+
+[ -x /usr/lib/box86-16k/bin/box86 ] || {
+    echo "box86-16k runtime missing: /usr/lib/box86-16k/bin/box86" >&2
+    exit 1
+}
+
+# Preserve BOX86_NORCFILES and BOX86_EMULATED_LIBS supplied by the caller.
+export STEAM_RUNTIME=${STEAM_RUNTIME:-1}
+export STEAMOS=${STEAMOS:-1}
+export PATH="/usr/lib/box86-16k/bin:$PATH"
+exec "$STEAM_RUNTIME_BIN" "$@"

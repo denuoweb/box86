@@ -1,0 +1,204 @@
+From: box86-16k contributors
+Subject: [PATCH 1/2] ELFLOADER: handle 4K i386 PT_LOAD segments on non-4K hosts
+
+Port the mature non-4K 32-bit ELF mapping strategy from Box64's
+elfloader32 to Box86.
+
+The old Box86 path mixed ELF p_align/4K boundaries with the host
+mmap page size.  On a 16K host this could leave portions of a PT_LOAD
+segment backed by the wrong host page/file region.  Steam then reached
+0xff-filled memory and reported an illegal opcode.
+
+Keep mmap operations host-page aligned while preserving the original
+ELF virtual addresses.  Also allow file-backed mapping when p_vaddr and
+p_offset share the same host-page offset, and defer final page
+protection until every PT_LOAD sharing a host page has been populated.
+
+Based on the non-4K/Box32 work in ptitSeb/box64, in particular commits
+61d01a4c2c7220b57952b83c270df3f058180095 and
+b5d45778c437961a3d7042a680acf33d980f05ff.
+---
+ src/elfs/elfloader.c | 123 ++++++++++++++++++++++++++++++++++++++------------
+ 1 file changed, 93 insertions(+), 30 deletions(-)
+
+diff --git a/src/elfs/elfloader.c b/src/elfs/elfloader.c
+index 3672433..16c0001 100644
+--- a/src/elfs/elfloader.c
++++ b/src/elfs/elfloader.c
+@@ -184,7 +184,23 @@ int AllocLoadElfMemory(box86context_t* context, elfheader_t* head, int mainbin)
+         raw = mmap64((void*)offs, sz, 0, MAP_ANONYMOUS|MAP_PRIVATE|MAP_NORESERVE, -1, 0);
+         image = (void*)(((uintptr_t)raw+max_align)&~max_align);
+     } else {
+-        image = raw = mmap64((void*)head->vaddr, sz, 0, MAP_ANONYMOUS|MAP_PRIVATE|MAP_NORESERVE, -1, 0);
++        /*
++         * ELF32 objects are commonly linked on 4K boundaries.  mmap(2)
++         * however requires a host-page-aligned address.  Reserve the host
++         * page containing the requested ELF address and keep `image` at the
++         * guest-visible address inside that mapping.
++         */
++        if(head->vaddr & (box86_pagesize-1)) {
++            uintptr_t aligned_addr = head->vaddr & ~(box86_pagesize-1);
++            size_t extra = head->vaddr - aligned_addr;
++            raw = mmap64((void*)aligned_addr, sz + extra, 0, MAP_ANONYMOUS|MAP_PRIVATE|MAP_NORESERVE, -1, 0);
++            if(raw != MAP_FAILED && (uintptr_t)raw == aligned_addr) {
++                image = (void*)head->vaddr;
++                sz += extra;
++            } else
++                image = raw;
++        } else
++            image = raw = mmap64((void*)head->vaddr, sz, 0, MAP_ANONYMOUS|MAP_PRIVATE|MAP_NORESERVE, -1, 0);
+     }
+     if(image!=MAP_FAILED && !head->vaddr && image!=(void*)offs) {
+         printf_log(LOG_INFO, "%s: Mmap64 for (@%p 0x%zx) for elf \"%s\" returned %p(%p/0x%zx) instead\n", (((uintptr_t)image)&max_align)?"Error":"Warning", (void*)(head->vaddr?head->vaddr:offs), head->memsz, head->name, image, raw, head->align);
+@@ -236,12 +248,9 @@ int AllocLoadElfMemory(box86context_t* context, elfheader_t* head, int mainbin)
+             head->multiblocks[n].size = e->p_filesz;
+             head->multiblocks[n].align = e->p_align;
+             uint8_t prot = PROT_READ|PROT_WRITE|((e->p_flags & PF_X)?PROT_EXEC:0);
+-            // check if alignment is correct
+-            uintptr_t balign = head->multiblocks[n].align-1;
+-            if(balign<4095) balign = 4095;
+-            head->multiblocks[n].asize = (e->p_memsz+(e->p_paddr&balign)+4095)&~4095;
++            head->multiblocks[n].asize = (e->p_memsz + (e->p_paddr & (box86_pagesize - 1)) + (box86_pagesize - 1)) & ~(box86_pagesize - 1);
+             int try_mmap = 1;
+-            if(e->p_paddr&balign)
++            if(e->p_paddr&(box86_pagesize - 1))
+                 try_mmap = 0;
+             if(e->p_offset&(box86_pagesize-1))
+                 try_mmap = 0;
+@@ -276,30 +285,62 @@ int AllocLoadElfMemory(box86context_t* context, elfheader_t* head, int mainbin)
+                 }
+             }
+             if(!try_mmap) {
+-                uintptr_t paddr = head->multiblocks[n].paddr&~balign;
+-                size_t asize = head->multiblocks[n].asize;
++                uintptr_t paddr = head->multiblocks[n].paddr&~(box86_pagesize - 1);
++                size_t asize = ALIGN(e->p_memsz + (head->multiblocks[n].paddr - paddr));
+                 void* p = MAP_FAILED;
+-                if(paddr==(paddr&~(box86_pagesize-1)) && (asize==ALIGN(asize))) {
++                int mapped_file = 0;
++                size_t file_read_size = e->p_filesz;
++
++                /*
++                 * A segment need not begin on a host-page boundary.  It can
++                 * still be mapped directly from the file when its virtual
++                 * address and file offset have the same host-page offset.
++                 */
++                uintptr_t file_delta = head->multiblocks[n].paddr - paddr;
++                size_t file_size = ALIGN(e->p_filesz + file_delta);
++                off_t file_offset = e->p_offset & ~(box86_pagesize - 1);
++                if(e->p_filesz &&
++                   e->p_filesz == e->p_memsz &&
++                   ((head->multiblocks[n].paddr ^ e->p_offset) & (box86_pagesize - 1)) == 0 &&
++                   file_size <= asize) {
++                    uintptr_t file_map_addr = paddr;
++                    while(file_map_addr < head->multiblocks[n].paddr + e->p_filesz && getProtection(file_map_addr))
++                        file_map_addr += box86_pagesize;
++                    if(file_map_addr < head->multiblocks[n].paddr + e->p_filesz) {
++                        size_t file_map_delta = file_map_addr - paddr;
++                        void* file_map = mmap64((void*)file_map_addr, file_size - file_map_delta,
++                            prot|PROT_WRITE, MAP_PRIVATE|MAP_FIXED, head->fileno,
++                            file_offset + file_map_delta);
++                        mapped_file = file_map == (void*)file_map_addr;
++                        if(mapped_file) {
++                            p = (void*)paddr;
++                            file_read_size = file_map_addr > head->multiblocks[n].paddr
++                                ? file_map_addr - head->multiblocks[n].paddr : 0;
++                            if(file_read_size > e->p_filesz)
++                                file_read_size = e->p_filesz;
++                        }
++                    }
++                }
++
++                if(!mapped_file && !file_delta) {
+                     printf_dump(log_level, "Allocating 0x%zx (0x%zx) bytes @%p, will read 0x%zx @%p for Elf \"%s\"\n", asize, e->p_memsz, (void*)paddr, e->p_filesz, (void*)head->multiblocks[n].paddr, head->name);
+-                    p = mmap64(
+-                        (void*)paddr,
+-                        asize,
+-                        prot|PROT_WRITE,
+-                        MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED,
+-                        -1,
+-                        0
+-                    );
+-                } else {
++                    p = mmap64((void*)paddr, asize, prot|PROT_WRITE,
++                        MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, -1, 0);
++                } else if(!mapped_file) {
+                     // difference in pagesize, so need to mmap only what needed to be...
+                     //check startint point
+-                    uintptr_t new_addr = paddr;
+-                    ssize_t new_size = asize;
+-                    while(getProtection(new_addr) && (new_size>0)) {
+-                        new_size -= ALIGN(new_addr) - new_addr;
+-                        new_addr = ALIGN(new_addr);
++                    uintptr_t new_addr = paddr&~(box86_pagesize-1);
++                    ssize_t new_size = asize + (paddr-new_addr);
++                    while(getProtection(new_addr) && (new_size>0)) {
++                        uintptr_t diff = ALIGN(new_addr+1) - new_addr;
++                        if(diff<(size_t)new_size)
++                            new_size -= diff;
++                        else
++                            new_size = 0;
++                        new_addr = ALIGN(new_addr+1);
+                     }
+                     if(new_size>0) {
+-                        printf_dump(log_level, "Allocating 0x%zx (0x%zx) bytes @%p, will read 0x%zx @%p for Elf \"%s\"\n", ALIGN(new_size), e->p_memsz, (void*)new_addr, e->p_filesz, (void*)head->multiblocks[n].paddr, head->name);
++                        printf_dump(log_level, "Allocating 0x%zx (0x%zx/0x%zx) bytes @%p, will read 0x%zx @%p for Elf \"%s\"\n", ALIGN(new_size), paddr, e->p_memsz, (void*)new_addr, e->p_filesz, (void*)head->multiblocks[n].paddr, head->name);
+                         p = mmap64(
+                             (void*)new_addr,
+                             ALIGN(new_size),
+@@ -311,7 +339,7 @@ int AllocLoadElfMemory(box86context_t* context, elfheader_t* head, int mainbin)
+                     }
+                 }
+                 if(p==MAP_FAILED || p!=(void*)paddr) {
+-                    printf_log(LOG_NONE, "Cannot create memory map (@%p 0x%zx/0x%zx) for elf \"%s\"", (void*)paddr, asize, balign, head->name);
++                    printf_log(LOG_NONE, "Cannot create memory map (@%p 0x%zx/0x%zx) for elf \"%s\"", (void*)paddr, asize, (box86_pagesize-1), head->name);
+                     if(p==MAP_FAILED) {
+                         printf_log(LOG_NONE, " error=%d/%s\n", errno, strerror(errno));
+                     } else {
+@@ -321,15 +349,15 @@ int AllocLoadElfMemory(box86context_t* context, elfheader_t* head, int mainbin)
+                 }
+                 setProtection_elf((uintptr_t)p, asize, prot);
+                 head->multiblocks[n].p = p;
+-                if(e->p_filesz) {
++                if(file_read_size) {
+                     fseeko64(head->file, head->multiblocks[n].offs, SEEK_SET);
+-                    if(fread((void*)head->multiblocks[n].paddr, head->multiblocks[n].size, 1, head->file)!=1) {
+-                        printf_log(LOG_NONE, "Cannot read elf block (@%p 0x%zx/0x%zx) for elf \"%s\"\n", (void*)head->multiblocks[n].offs, head->multiblocks[n].asize, balign, head->name);
++                    if(fread((void*)head->multiblocks[n].paddr, file_read_size, 1, head->file)!=1) {
++                        printf_log(LOG_NONE, "Cannot read elf block (@%p 0x%zx/0x%zx) for elf \"%s\"\n", (void*)head->multiblocks[n].offs, head->multiblocks[n].asize, (box86_pagesize-1), head->name);
+                         return 1;
+                     }
+                 }
+-                if(!(prot&PROT_WRITE) && (paddr==(paddr&(box86_pagesize-1)) && (asize==ALIGN(asize))))
+-                    mprotect((void*)paddr, asize, prot);
++                if(e->p_memsz > e->p_filesz && (prot&PROT_WRITE))
++                    memset((void*)(head->multiblocks[n].paddr + e->p_filesz), 0, e->p_memsz - e->p_filesz);
+             }
+ #ifdef DYNAREC
+             if(box86_dynarec && (e->p_flags & PF_X)) {
+@@ -360,7 +388,25 @@ int AllocLoadElfMemory(box86context_t* context, elfheader_t* head, int mainbin)
+             if(e->p_filesz != e->p_memsz)
+                 memset(dest+e->p_filesz, 0, e->p_memsz - e->p_filesz);
+         }
+     }
++
++    /*
++     * Multiple 4K ELF segments can occupy one 16K host page.  Applying a
++     * segment's final read-only/execute protection while a later segment is
++     * still being populated would make the later fread fail.  Defer host
++     * mprotect until every PT_LOAD has been copied/mapped.
++     */
++    for(int j=0; j<n; ++j) {
++        if(!(head->multiblocks[j].flags & PF_W)) {
++            uintptr_t start = head->multiblocks[j].paddr & ~(box86_pagesize-1);
++            uintptr_t end = ALIGN(head->multiblocks[j].paddr + head->multiblocks[j].asize);
++            for(uintptr_t page=start; page<end; page+=box86_pagesize) {
++                uint32_t page_prot = getProtection(page);
++                if(page_prot && !(page_prot & PROT_WRITE))
++                    mprotect((void*)page, box86_pagesize, page_prot & ~PROT_CUSTOM);
++            }
++        }
++    }
+ 
+     // can close the elf file now!
+     fclose(head->file);

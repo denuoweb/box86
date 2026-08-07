@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+printf 'host page size: '; getconf PAGESIZE
+printf 'box86-16k: '; /usr/lib/box86-16k/bin/box86 -v 2>&1 | head -1 || true
+if [ -r /proc/sys/fs/binfmt_misc/x86 ]; then
+    echo 'binfmt x86:'
+    cat /proc/sys/fs/binfmt_misc/x86
+else
+    echo 'binfmt x86 handler is not registered'
+fi
