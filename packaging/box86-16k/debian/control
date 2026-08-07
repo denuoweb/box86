@@ -11,6 +11,8 @@ Package: box86-16k
 Architecture: armhf
 Multi-Arch: foreign
 Depends: ${misc:Depends}, ${shlibs:Depends}, libc6
+Conflicts: box86-steam16k
+Replaces: box86-steam16k (<= 0.3.8+16k)
 Description: Box86 with non-4K host-page support for Raspberry Pi 5
  Box86 userspace i386 emulator patched to load 4K-aligned ELF32 PT_LOAD
  segments correctly on hosts with 16K pages. Builds on Raspberry Pi 5
