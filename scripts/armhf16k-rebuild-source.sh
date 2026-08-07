@@ -21,7 +21,7 @@ for x in apt-get apt-cache dpkg dpkg-source dpkg-buildpackage dpkg-parsechangelo
 done
 
 if ! dpkg --print-foreign-architectures | grep -qx "$HOST_ARCH" && [[ "$(dpkg --print-architecture)" != "$HOST_ARCH" ]]; then
-    echo "$HOST_ARCH is not enabled as a foreign architecture. Run scripts/armhf16k-bootstrap-debian13.sh first." >&2
+    echo "$HOST_ARCH is not enabled as a foreign architecture. Run: bash scripts/armhf16k-bootstrap-debian13.sh" >&2
     exit 3
 fi
 
@@ -87,7 +87,7 @@ fi
 
 # Do not publish a source build unless every ARM ELF shipped by its binary
 # packages satisfies the 16K PT_LOAD congruence invariant.
-"$ROOT/scripts/armhf16k-verify-debs.py" --page-size "$PAGE_SIZE" "${DEBS[@]}"
+python3 "$ROOT/scripts/armhf16k-verify-debs.py" --page-size "$PAGE_SIZE" "${DEBS[@]}"
 
 for deb in "${DEBS[@]}"; do
     cp -f "$deb" "$POOL/"
