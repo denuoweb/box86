@@ -1,0 +1,8 @@
+# stage	source-package	binary-packages-that-were-16K-bad-on-Debian-13-Pi5
+10	zlib	zlib1g
+20	libbsd	libbsd0
+30	libxau	libxau6
+40	libxcb	libxcb1,libxcb-randr0,libxcb-sync1,libxcb-present0,libxcb-xfixes0,libxcb-dri3-0,libxcb-shm0
+50	elfutils	libelf1t64
+60	llvm-toolchain-19	libllvm19
+70	libglvnd	libgl1,libglx0,libegl1
