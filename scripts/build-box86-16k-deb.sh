@@ -9,7 +9,7 @@ SRC="$WORK/box86-$COMMIT"
 DIST=${DISTDIR:-"$ROOT/dist"}
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing build tool: $1" >&2; exit 2; }; }
-for x in git cmake make python3 dpkg-buildpackage arm-linux-gnueabihf-gcc readelf; do need "$x"; done
+for x in git cmake make python3 dpkg-buildpackage arm-linux-gnueabihf-gcc arm-linux-gnueabihf-ar arm-linux-gnueabihf-strip arm-linux-gnueabihf-ranlib readelf; do need "$x"; done
 
 rm -rf "$WORK"
 mkdir -p "$WORK" "$DIST"
@@ -47,7 +47,17 @@ sed -i "1s/([^)]*)/($VERSION)/" "$SRC/debian/changelog"
 
 (
     cd "$SRC"
-    dpkg-buildpackage -b -us -uc -aarmhf
+    # dpkg-buildpackage's cross-build dependency checker otherwise treats
+    # unqualified native tools such as make/python3 as armhf dependencies on
+    # an arm64 host. We already verify the required native and cross tools
+    # above, so skip that architecture-mismatched check and explicitly expose
+    # the ARMHF toolchain to dpkg/debhelper as well as CMake.
+    export CC=arm-linux-gnueabihf-gcc
+    export AS=arm-linux-gnueabihf-gcc
+    export AR=arm-linux-gnueabihf-ar
+    export STRIP=arm-linux-gnueabihf-strip
+    export RANLIB=arm-linux-gnueabihf-ranlib
+    dpkg-buildpackage -b -us -uc -aarmhf -d
 )
 
 found=0
