@@ -1,4 +1,4 @@
-box86-16k (0.3.8+git20260807.0579f8b+16k5) unstable; urgency=medium
+box86-16k (0.3.8+git20260807.0579f8b+16k6) unstable; urgency=medium
 
   * Port Box64 non-4K ELF32 loader handling to Box86.
   * Handle i386 4K mprotect requests on larger host pages.
@@ -13,5 +13,9 @@ box86-16k (0.3.8+git20260807.0579f8b+16k5) unstable; urgency=medium
     box86-steam16k package so upgrades can replace its binfmt file cleanly.
   * Install Box86's upstream /etc/box86.box86rc database explicitly so Steam gets
     its intended BOX86_NOGTK, strong-memory, callret, and emulated-library profile.
+  * Add the ARMHF16K native-library closure auditor and ship the observed Debian 13
+    Pi 5 incompatible-library manifest with the runtime package.
+  * Add reproducible Debian source rebuild and local APT repository tooling for
+    16K-compatible ARMHF zlib, BSD, Xau, XCB, elfutils, LLVM 19, and libglvnd.
 
- -- DenuoWeb <5424250+denuoweb@users.noreply.github.com>  Fri, 07 Aug 2026 16:20:00 -0700
+ -- DenuoWeb <5424250+denuoweb@users.noreply.github.com>  Fri, 07 Aug 2026 16:55:00 -0700
