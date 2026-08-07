@@ -38,6 +38,9 @@ override_dh_auto_install:
 	install -Dm755 tests/box86-16k/test_steam_16k.sh debian/box86-16k/usr/lib/box86-16k/tests/test_steam_16k.sh
 	install -Dm755 tests/box86-16k/test_mapping_model.py debian/box86-16k/usr/lib/box86-16k/tests/test_mapping_model.py
 	install -Dm755 tests/box86-16k/make_elf32_16k_fixture.py debian/box86-16k/usr/lib/box86-16k/tests/make_elf32_16k_fixture.py
+	install -Dm755 scripts/armhf16k-audit.py debian/box86-16k/usr/lib/box86-16k/tools/armhf16k-audit.py
+	install -Dm644 armhf16k/manifest.tsv debian/box86-16k/usr/share/box86-16k/armhf16k-manifest.tsv
+	install -Dm644 armhf16k/baseline-debian13-pi5.tsv debian/box86-16k/usr/share/box86-16k/armhf16k-baseline-debian13-pi5.tsv
 
 override_dh_shlibdeps:
 	dh_shlibdeps --exclude=libgcc_s.so.1 --exclude=libpng12.so.0 --exclude=libstdc++.so.5 --exclude=libstdc++.so.6 --exclude=libunwind.so.8
