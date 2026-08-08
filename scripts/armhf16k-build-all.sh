@@ -29,7 +29,7 @@ while IFS=$'\t' read -r stage source targets; do
     echo "============================================================"
 
     case "$source" in
-        zlib|libbsd|libxau|libxdmcp|libxcb|libxi|libasyncns)
+        zlib|libbsd|libxau|libxdmcp|libxcb|libxi|libasyncns|libogg)
             bash "$ROOT/scripts/armhf16k-rebuild-source.sh" "$source"
             ;;
         mesa-pi5-private)
