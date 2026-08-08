@@ -2,9 +2,11 @@
 set -euo pipefail
 
 HOST_ARCH=${HOST_ARCH:-armhf}
+BUILD_ARCH=${BUILD_ARCH:-$(dpkg --print-architecture)}
 SUDO=${SUDO:-sudo}
 DEBIAN_SRC_FILE=${DEBIAN_SRC_FILE:-/etc/apt/sources.list.d/armhf16k-debian-src.sources}
 DEBIAN_KEYRING=${DEBIAN_KEYRING:-}
+SBUILD_TARBALL=${ARMHF16K_SBUILD_TARBALL:-"$HOME/.cache/sbuild/trixie-${BUILD_ARCH}.tar.gz"}
 
 if ! command -v apt-get >/dev/null 2>&1; then
     echo "This bootstrap targets Debian/apt systems." >&2
@@ -16,6 +18,7 @@ if [[ -r /etc/os-release ]]; then
     . /etc/os-release
 fi
 CODENAME=${VERSION_CODENAME:-trixie}
+SBUILD_TARBALL=${ARMHF16K_SBUILD_TARBALL:-"$HOME/.cache/sbuild/${CODENAME}-${BUILD_ARCH}.tar.gz"}
 if [[ "$CODENAME" != "trixie" ]]; then
     echo "Warning: expected Debian 13/trixie, detected codename '$CODENAME'." >&2
 fi
@@ -60,8 +63,6 @@ fi
 # Debian source metadata is separate from binary package metadata. Modern
 # Debian uses deb822 .sources files; install a source-only companion rather
 # than modifying the user's existing binary repository configuration.
-# Always rewrite our companion file when source resolution is unavailable so a
-# previously generated entry with a mismatched Signed-By value repairs itself.
 if ! source_resolves zlib; then
     echo "Enabling Debian source repositories in $DEBIAN_SRC_FILE"
     echo "Using Debian archive keyring: $DEBIAN_KEYRING"
@@ -86,16 +87,17 @@ fi
 $SUDO apt-get update
 $SUDO apt-get install -y --no-install-recommends \
     build-essential \
-    crossbuild-essential-armhf \
     devscripts \
-    debhelper \
     dpkg-dev \
     fakeroot \
-    equivs \
     python3 \
     binutils \
     gzip \
-    apt-utils
+    apt-utils \
+    sbuild \
+    debootstrap \
+    mmdebstrap \
+    uidmap
 
 if ! source_resolves zlib; then
     cat >&2 <<MSG
@@ -110,4 +112,36 @@ MSG
 fi
 
 echo "Verified Debian source resolution: zlib"
+
+# Keep all ARMHF build dependencies out of the normal host package database.
+# sbuild's unshare backend uses an ephemeral clean root and does not require
+# sudo for package builds. User namespaces are required by that backend.
+if ! unshare -Ur true >/dev/null 2>&1; then
+    cat >&2 <<'MSG'
+Unprivileged user namespaces are unavailable, but ARMHF16K now uses sbuild's
+unshare backend to isolate cross-build dependencies from the host system.
+Enable them and rerun bootstrap, for example:
+  sudo sysctl -w kernel.unprivileged_userns_clone=1
+MSG
+    exit 4
+fi
+
+if [[ ! -f "$SBUILD_TARBALL" ]]; then
+    echo "Creating isolated sbuild base: $SBUILD_TARBALL"
+    mkdir -p "$(dirname "$SBUILD_TARBALL")"
+    tmpdir=$(mktemp -d)
+    trap 'rm -rf "$tmpdir"' EXIT
+    sbuild-createchroot \
+        --chroot-mode=unshare \
+        --arch="$BUILD_ARCH" \
+        --components=main \
+        --make-sbuild-tarball="$SBUILD_TARBALL" \
+        "$CODENAME" "$tmpdir" http://deb.debian.org/debian
+    rm -rf "$tmpdir"
+    trap - EXIT
+fi
+
+[[ -r "$SBUILD_TARBALL" ]] || { echo "sbuild tarball was not created: $SBUILD_TARBALL" >&2; exit 5; }
+
+echo "Verified isolated sbuild base: $SBUILD_TARBALL"
 echo "ARMHF16K build prerequisites are installed."
