@@ -13,7 +13,7 @@ PKGROOT="$WORK/pkg"
 NATIVE="$PKGROOT$PREFIX"
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing tool: $1" >&2; exit 2; }; }
-for x in dpkg-deb python3 readelf; do need "$x"; done
+for x in dpkg-deb python3 readelf readlink; do need "$x"; done
 [[ -d "$MESA_ROOT/usr/lib/arm-linux-gnueabihf" ]] || { echo "Missing Mesa staging root. Build mesa-pi5-private first." >&2; exit 3; }
 [[ -d "$GLVND_ROOT/usr/lib/arm-linux-gnueabihf" ]] || { echo "Missing GLVND staging root. Build libglvnd-private first." >&2; exit 3; }
 
@@ -103,7 +103,30 @@ for soname in libGL.so.1 libGLX.so.0 libEGL.so.1 libxcb.so.1 libXau.so.6 libz.so
         exit 5
     }
 done
-find "$NATIVE/dri" -maxdepth 1 -type f \( -name 'v3d_dri.so' -o -name 'vc4_dri.so' \) -print -quit 2>/dev/null | grep -q . || {
+
+# Mesa intentionally installs v3d_dri.so as a symlink to the shared DRI driver
+# implementation (libdril_dri.so). Accept either a regular file or symlink, but
+# require the resolved target to exist and remain inside the private runtime.
+found_pi_dri=0
+for driver in "$NATIVE/dri/v3d_dri.so" "$NATIVE/dri/vc4_dri.so"; do
+    [[ -e "$driver" || -L "$driver" ]] || continue
+    target=$(readlink -f -- "$driver" 2>/dev/null || true)
+    [[ -n "$target" && -f "$target" ]] || {
+        echo "Pi DRI driver is a broken link: $driver" >&2
+        exit 5
+    }
+    case "$target" in
+        "$NATIVE"/*) ;;
+        *)
+            echo "Pi DRI driver resolves outside private runtime: $driver -> $target" >&2
+            exit 5
+            ;;
+    esac
+    echo "Verified Pi DRI driver: $driver -> $target"
+    found_pi_dri=1
+    break
+done
+[[ $found_pi_dri -eq 1 ]] || {
     echo "Private Mesa runtime has no Pi V3D/VC4 DRI driver" >&2
     exit 5
 }
