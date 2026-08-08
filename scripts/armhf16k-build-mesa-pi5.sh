@@ -10,14 +10,14 @@ PAGE_SIZE=${PAGE_SIZE:-16384}
 DEBIAN_SECURITY_VERSION=${ARMHF16K_MESA_DEBIAN_SECURITY_VERSION:-25.0.7-2+deb13u1}
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing tool: $1" >&2; exit 2; }; }
-for x in apt-cache apt-get curl dget dpkg dpkg-source meson ninja readelf python3 quilt; do need "$x"; done
+for x in apt-cache apt-get curl dget dpkg dpkg-source meson ninja patch readelf python3; do need "$x"; done
 
 # Only install the development surface needed by Raspberry Pi V3D/V3DV. Do not
 # install LLVM or libelf development packages: they are not part of the Pi5
 # hardware-driver closure we are building.
 $SUDO apt-get install -y --no-install-recommends \
     meson ninja-build pkg-config python3-mako python3-yaml python3-packaging python3-ply \
-    bison flex quilt \
+    bison flex patch \
     libdrm-dev:${HOST_ARCH} \
     libexpat1-dev:${HOST_ARCH} \
     libx11-dev:${HOST_ARCH} libx11-xcb-dev:${HOST_ARCH} libxext-dev:${HOST_ARCH} libxfixes-dev:${HOST_ARCH} \
@@ -58,11 +58,10 @@ PI_DSC=$(find "$WORK/pi-fetch" -maxdepth 1 -type f -name 'mesa_*.dsc' -printf '%
 [[ -n "$PI_DSC" && -f "$PI_DSC" ]] || { echo "Raspberry Pi Mesa .dsc was not downloaded" >&2; exit 4; }
 dpkg-source -x "$PI_DSC" "$WORK/src"
 
-# Debian Trixie 25.0.7-2+deb13u1 fixes CVE-2026-40393 with three quilt
-# patches. Pi's rpt4 source is based on the same 25.0.7 upstream but the public
-# Pi source archive does not carry the +deb13u1 source suffix, so explicitly
-# layer those stable-security patches onto the Pi tree. Never silently fall
-# back to the pre-security Pi source alone.
+# Debian Trixie 25.0.7-2+deb13u1 fixes CVE-2026-40393 with three patches.
+# Apply that security delta directly to the Pi source in order. A reverse dry
+# run treats an already-incorporated patch as satisfied; any other conflict is
+# fatal. This avoids depending on or rewriting the Pi quilt series.
 echo "Fetching Debian Mesa security source: $DEBIAN_SECURITY_VERSION"
 (
     cd "$WORK/debian-security-fetch"
@@ -76,37 +75,27 @@ SEC_DSC=$(find "$WORK/debian-security-fetch" -maxdepth 1 -type f -name 'mesa_*.d
 }
 dpkg-source -x "$SEC_DSC" "$WORK/debian-security-src"
 
-python3 - "$WORK/debian-security-src" "$WORK/src" <<'PY'
-from pathlib import Path
-import shutil
-import sys
-
-security = Path(sys.argv[1]) / "debian/patches"
-target = Path(sys.argv[2]) / "debian/patches"
-required = [
-    "backport_STACK_ARRAY.patch",
-    "CVE-2026-40393-part1.patch",
-    "CVE-2026-40393-part2.patch",
-]
-series = target / "series"
-lines = series.read_text().splitlines() if series.exists() else []
-for name in required:
-    src = security / name
-    if not src.is_file():
-        raise SystemExit(f"Debian security source is missing required patch: {name}")
-    dst = target / name
-    shutil.copy2(src, dst)
-    if name not in lines:
-        lines.append(name)
-series.write_text("\n".join(lines) + "\n")
-print("Applied Debian Trixie Mesa CVE-2026-40393 patch series to Raspberry Pi source")
-PY
-
-# Apply the newly appended security quilt patches to the unpacked Pi source.
-(
-    cd "$WORK/src"
-    QUILT_PATCHES=debian/patches quilt push -a
+SEC_PATCH_DIR="$WORK/debian-security-src/debian/patches"
+SEC_PATCHES=(
+    "backport_STACK_ARRAY.patch"
+    "CVE-2026-40393-part1.patch"
+    "CVE-2026-40393-part2.patch"
 )
+for name in "${SEC_PATCHES[@]}"; do
+    p="$SEC_PATCH_DIR/$name"
+    [[ -f "$p" ]] || { echo "Debian security source is missing required patch: $name" >&2; exit 4; }
+    if patch --dry-run -d "$WORK/src" -p1 <"$p" >/dev/null 2>&1; then
+        echo "Applying Debian Mesa security patch: $name"
+        patch -d "$WORK/src" -p1 <"$p"
+    elif patch --dry-run -R -d "$WORK/src" -p1 <"$p" >/dev/null 2>&1; then
+        echo "Security patch already present in Raspberry Pi source: $name"
+    else
+        echo "Security patch does not apply cleanly to Raspberry Pi Mesa source: $name" >&2
+        exit 4
+    fi
+done
+
+echo "Verified Debian Trixie Mesa CVE-2026-40393 security delta in Raspberry Pi source"
 
 CROSS="$WORK/armhf.ini"
 bash "$ROOT/scripts/armhf16k-meson-cross-file.sh" "$CROSS" >/dev/null
