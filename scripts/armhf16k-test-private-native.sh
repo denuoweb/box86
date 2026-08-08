@@ -44,6 +44,7 @@ libs=(
     "$PREFIX/libXi.so.6"
     "$PREFIX/libasyncns.so.0"
     "$PREFIX/libogg.so.0"
+    "$PREFIX/libmp3lame.so.0"
     "$PREFIX/libGLdispatch.so.0"
     "$PREFIX/libGLX_mesa.so.0"
     "$PREFIX/libEGL_mesa.so.0"
@@ -52,9 +53,6 @@ libs=(
     "$PREFIX/libGL.so.1"
 )
 
-# libpulse itself is supplied by Debian. Re-test the real system libpulse with
-# the private 16K replacements for the bad transitive nodes discovered during
-# validation (libasyncns/libogg plus the existing XCB/Xau closure).
 for pulse in /usr/lib/arm-linux-gnueabihf/libpulse.so.0 /lib/arm-linux-gnueabihf/libpulse.so.0; do
     if [[ -e "$pulse" ]]; then
         libs+=("$pulse")
