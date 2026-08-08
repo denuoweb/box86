@@ -1,4 +1,4 @@
-box86-16k (0.3.8+git20260807.0579f8b+16k7) unstable; urgency=medium
+box86-16k (0.3.8+git20260807.0579f8b+16k8) unstable; urgency=medium
 
   * Port Box64 non-4K ELF32 loader handling to Box86.
   * Handle i386 4K mprotect requests on larger host pages.
@@ -15,12 +15,13 @@ box86-16k (0.3.8+git20260807.0579f8b+16k7) unstable; urgency=medium
     its intended BOX86_NOGTK, strong-memory, callret, and emulated-library profile.
   * Add the ARMHF16K native-library closure auditor and ship the observed Debian 13
     Pi 5 incompatible-library manifest with the runtime package.
-  * Keep the validated zlib/libbsd/libXau/libxcb ARMHF cross-build path.
+  * Keep the validated zlib/libbsd/libXau/libXdmcp/libxcb ARMHF cross-build path.
   * Replace the elfutils/LLVM rebuild requirement with a private Raspberry Pi 5
     Mesa build limited to V3D/V3DV and built with LLVM disabled.
   * Build a private 16K-compatible GLVND and assemble all host-side ARMHF pieces
     into box86-armhf16k-runtime under /usr/lib/box86-16k/native16k.
-  * Make steam16k prefer the private native runtime when it is installed, without
-    replacing Debian's normal ARMHF graphics libraries.
+  * Route i386 binfmt through /usr/bin/box86-16k and scope the private ARMHF
+    LD_LIBRARY_PATH/DRI/EGL/Vulkan environment to Box86 descendants only, keeping
+    Steam's 64-bit bootstrap/supervisor environment clean.
 
- -- DenuoWeb <5424250+denuoweb@users.noreply.github.com>  Fri, 07 Aug 2026 19:10:00 -0700
+ -- DenuoWeb <5424250+denuoweb@users.noreply.github.com>  Fri, 07 Aug 2026 20:55:00 -0700
