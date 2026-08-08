@@ -38,7 +38,9 @@ python3 "$ROOT/scripts/armhf16k-verify-tree.py" --page-size 16384 "$WORK"
 
 libs=(
     "$PREFIX/libz.so.1"
+    "$PREFIX/libbsd.so.0"
     "$PREFIX/libXau.so.6"
+    "$PREFIX/libXdmcp.so.6"
     "$PREFIX/libxcb.so.1"
     "$PREFIX/libGLdispatch.so.0"
     "$PREFIX/libGLX_mesa.so.0"
