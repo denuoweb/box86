@@ -44,19 +44,23 @@ Several important ARMHF components were already 16K-compatible and are intention
 
 ## Bootstrap
 
-The builder is intended to run on Debian 13 arm64 on a machine whose kernel/CPU can execute Debian ARMHF binaries directly:
+The builder targets Debian 13 arm64 on Raspberry Pi 5:
 
 ```bash
 bash scripts/armhf16k-bootstrap-debian13.sh
 ```
 
-The bootstrap enables matching Debian source repositories when necessary, installs `sbuild`, `arch-test`, and the unshare-backend prerequisites, verifies native ARMHF execution, and creates a reusable clean ARMHF build root under:
+The bootstrap enables matching Debian source repositories when necessary, installs `sbuild` and QEMU linux-user support, and creates a reusable clean ARMHF build root under:
 
 ```text
 ~/.cache/sbuild/trixie-armhf.tar.gz
 ```
 
-Build dependencies are **not** installed into the normal host package database. Each source is built natively as ARMHF inside an ephemeral ARMHF sbuild environment. This avoids both host Multi-Arch development-package collisions and Debian cross-build dependency graphs that are `bd-uninstallable` even when the same package builds normally on ARMHF.
+A 16K arm64 kernel can execute ARMHF in principle, but stock Debian ARMHF bootstrap binaries may themselves have 4K-only PT_LOAD layouts. That creates a bootstrap cycle: the ARMHF package set must be rebuilt for 16K before all of its own build tools can be executed natively. ARMHF16K breaks that cycle with a temporary QEMU ARM binfmt registration while the clean root and packages are being built.
+
+The temporary handler is named `armhf16k-qemu-arm`. It uses Debian's QEMU ARM linux-user interpreter and is removed by traps after bootstrap/build. It is intentionally not left enabled, because the final runtime is supposed to execute the rebuilt ARMHF libraries directly on the 16K kernel rather than through QEMU.
+
+Build dependencies are **not** installed into the normal host package database. Each source is built as ARMHF inside an ephemeral ARMHF sbuild environment, with QEMU used only as the execution bridge for stock 4K-oriented build tools. This avoids both host Multi-Arch development-package collisions and Debian cross-build dependency graphs that are `bd-uninstallable`.
 
 The unshare backend requires unprivileged user namespaces. The bootstrap checks this before declaring the environment ready.
 
@@ -85,11 +89,12 @@ For each stage the rebuilder:
 1. downloads the configured Debian source package on the host;
 2. applies any source-specific ARMHF16K hook;
 3. creates a local `+16k1` source revision with the 16K linker policy persisted in `debian/rules`;
-4. invokes native `sbuild --arch=armhf` in the clean unshare root;
+4. enables the private QEMU ARM binfmt temporarily and invokes `sbuild --arch=armhf` in the clean unshare root;
 5. exposes previously built packages from `armhf16k/repo/pool/` to sbuild through its transient extra-package archive;
-6. validates every ARM ELF in every generated `.deb` before publishing it.
+6. removes the temporary QEMU handler;
+7. validates every ARM ELF in every generated `.deb` before publishing it.
 
-This keeps source-build dependencies isolated while still allowing later stages such as LLVM and GLVND to build against earlier ARMHF16K packages.
+The QEMU step is build-time scaffolding only. A package is not accepted merely because it works under QEMU; it must pass the direct 16K PT_LOAD verifier before entering the local repository.
 
 The source build is validated before its `.deb` files are copied into:
 
