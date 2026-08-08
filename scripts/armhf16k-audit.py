@@ -76,13 +76,44 @@ def armhf_ldconfig() -> dict[str, list[str]]:
     return result
 
 
-def resolve_soname(soname: str, cache: dict[str, list[str]]) -> str | None:
-    """Resolve an ARMHF SONAME using ldconfig, then the loader's multiarch dirs."""
+def armhf_file_index() -> dict[str, list[str]]:
+    """Index SONAME-like files below the ARMHF multiarch roots.
+
+    Some libraries used through DT_RUNPATH/RPATH are intentionally kept in
+    package-private subdirectories and are therefore absent from ldconfig -p.
+    PulseAudio's pulseaudio/libpulsecommon-*.so is a concrete example.
+    """
+    result: dict[str, list[str]] = {}
+    seen_real_dirs: set[str] = set()
+    for root in DEFAULT_ARMHF_DIRS:
+        if not os.path.isdir(root):
+            continue
+        real_root = os.path.realpath(root)
+        if real_root in seen_real_dirs:
+            continue
+        seen_real_dirs.add(real_root)
+        for directory, _subdirs, files in os.walk(root):
+            for name in files:
+                if ".so" not in name:
+                    continue
+                result.setdefault(name, []).append(os.path.join(directory, name))
+    return result
+
+
+def resolve_soname(
+    soname: str,
+    cache: dict[str, list[str]],
+    file_index: dict[str, list[str]],
+) -> str | None:
+    """Resolve ARMHF SONAMEs from ldconfig and multiarch/private directories."""
     for path in cache.get(soname, []):
         if os.path.exists(path):
             return path
     for directory in DEFAULT_ARMHF_DIRS:
         path = os.path.join(directory, soname)
+        if os.path.exists(path):
+            return path
+    for path in file_index.get(soname, []):
         if os.path.exists(path):
             return path
     return None
@@ -184,6 +215,7 @@ def record_for(soname: str, path: str | None, page_size: int) -> AuditRecord:
 
 def walk_closure(roots: Iterable[str], page_size: int) -> list[AuditRecord]:
     cache = armhf_ldconfig()
+    file_index = armhf_file_index()
     seen: set[str] = set()
     ordered: list[AuditRecord] = []
 
@@ -191,7 +223,7 @@ def walk_closure(roots: Iterable[str], page_size: int) -> list[AuditRecord]:
         if soname in seen:
             return
         seen.add(soname)
-        rec = record_for(soname, resolve_soname(soname, cache), page_size)
+        rec = record_for(soname, resolve_soname(soname, cache, file_index), page_size)
         ordered.append(rec)
         for dep in rec.needed:
             visit(dep)
