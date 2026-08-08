@@ -20,10 +20,18 @@ if ! command -v "$BOX86_BIN" >/dev/null 2>&1 && [ ! -x "$BOX86_BIN" ]; then
 fi
 
 set +e
-out=$(BOX86_NORCFILES=1 BOX86_DYNAREC=0 BOX86_LOG=1 "$BOX86_BIN" "$TMP/elf32-16k-overlap" 2>&1)
+out=$(BOX86_NORCFILES=1 BOX86_DYNAREC=0 BOX86_DYNAREC_LOG=1 BOX86_LOG=1 "$BOX86_BIN" "$TMP/elf32-16k-overlap" 2>&1)
 rc=$?
 set -e
 printf '%s\n' "$out"
+
+if [ "$pagesize" -gt 4096 ]; then
+    expected_hex=$(printf '%x' "$pagesize")
+    if ! printf '%s\n' "$out" | grep -Eq "New Bridge brick at .*\\(size 0x${expected_hex}\\)"; then
+        echo "FAIL: Box86 bridge brick is not one host page (expected 0x${expected_hex})" >&2
+        exit 1
+    fi
+fi
 
 if printf '%s\n' "$out" | grep -Eq 'Illegal Opcode|Cannot create memory map|ELF load command address/offset not page-aligned'; then
     echo "FAIL: non-4K ELF mapping regression reproduced" >&2
@@ -35,3 +43,4 @@ if ! printf '%s\n' "$out" | grep -q 'BOX86_16K_ELF_OK'; then
 fi
 
 echo "PASS: 4K-aligned ELF32 PT_LOAD segments execute on host page size $pagesize"
+echo "PASS: Box86 bridge brick matches host page size $pagesize"
