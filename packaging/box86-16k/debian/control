@@ -1,7 +1,7 @@
 Source: box86-16k
 Section: utils
 Priority: optional
-Maintainer: DenuoWeb <5424250+denuoweb@users.noreply.github.com>
+Maintainer: Jaron Rosenau <jaron@rosenau.info>
 Build-Depends: debhelper-compat (= 13), cmake:native, make:native, python3:native, gcc-arm-linux-gnueabihf, libc6-dev-armhf-cross
 Standards-Version: 4.6.2
 Homepage: https://github.com/denuoweb/box86
