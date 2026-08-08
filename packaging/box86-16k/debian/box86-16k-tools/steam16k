@@ -25,25 +25,12 @@ fi
     exit 1
 }
 
-# Prefer the private host-side ARMHF closure when installed. This affects the
-# native libraries opened by Box86 wrappers without replacing Debian's system
-# ARMHF graphics stack.
+# Do not put ARMHF libraries into the environment of Steam's 64-bit bootstrap,
+# runtime supervisor, or Box64 helpers. Mark the process tree instead; the
+# /usr/bin/box86-16k binfmt interpreter applies these paths only when an i386
+# executable is actually handed to Box86.
 if [ -d "$NATIVE16K" ]; then
-    export LD_LIBRARY_PATH="$NATIVE16K${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-    if [ -d "$NATIVE16K/dri" ]; then
-        export LIBGL_DRIVERS_PATH="$NATIVE16K/dri${LIBGL_DRIVERS_PATH:+:$LIBGL_DRIVERS_PATH}"
-    fi
-    if [ -d "$NATIVE16K/egl_vendor.d" ]; then
-        export __EGL_VENDOR_LIBRARY_DIRS="$NATIVE16K/egl_vendor.d${__EGL_VENDOR_LIBRARY_DIRS:+:$__EGL_VENDOR_LIBRARY_DIRS}"
-    fi
-    if [ -z "${VK_ICD_FILENAMES:-}" ] && [ -d "$NATIVE16K/vulkan/icd.d" ]; then
-        vk_icds=
-        for f in "$NATIVE16K"/vulkan/icd.d/*.json; do
-            [ -f "$f" ] || continue
-            vk_icds="${vk_icds:+$vk_icds:}$f"
-        done
-        [ -z "$vk_icds" ] || export VK_ICD_FILENAMES="$vk_icds"
-    fi
+    export BOX86_NATIVE16K_DIR="$NATIVE16K"
     export BOX86_LIBGL=${BOX86_LIBGL:-$NATIVE16K/libGL.so.1}
 fi
 
