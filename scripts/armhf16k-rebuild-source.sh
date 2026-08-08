@@ -4,11 +4,18 @@ set -euo pipefail
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 SOURCE=${1:-}
 HOST_ARCH=${HOST_ARCH:-armhf}
+BUILD_ARCH=${BUILD_ARCH:-$(dpkg --print-architecture)}
 PAGE_SIZE=${PAGE_SIZE:-16384}
 PAGE_HEX=$(printf '0x%x' "$PAGE_SIZE")
-SUDO=${SUDO:-sudo}
 WORK_ROOT=${ARMHF16K_WORK:-"$ROOT/armhf16k/work"}
 POOL=${ARMHF16K_POOL:-"$ROOT/armhf16k/repo/pool"}
+
+if [[ -r /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+fi
+CODENAME=${VERSION_CODENAME:-trixie}
+SBUILD_TARBALL=${ARMHF16K_SBUILD_TARBALL:-"$HOME/.cache/sbuild/${CODENAME}-${BUILD_ARCH}.tar.gz"}
 
 if [[ -z "$SOURCE" ]]; then
     echo "usage: $0 <Debian source package>" >&2
@@ -16,35 +23,15 @@ if [[ -z "$SOURCE" ]]; then
 fi
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing tool: $1" >&2; exit 2; }; }
-for x in apt-get dpkg dpkg-architecture dpkg-source dpkg-buildpackage dpkg-parsechangelog dch python3 readelf; do
+for x in apt-get dpkg dpkg-source dpkg-parsechangelog dch python3 readelf sbuild; do
     need "$x"
 done
 
-if ! dpkg --print-foreign-architectures | grep -qx "$HOST_ARCH" && [[ "$(dpkg --print-architecture)" != "$HOST_ARCH" ]]; then
-    echo "$HOST_ARCH is not enabled as a foreign architecture. Run: bash scripts/armhf16k-bootstrap-debian13.sh" >&2
+if [[ ! -r "$SBUILD_TARBALL" ]]; then
+    echo "Missing isolated sbuild base: $SBUILD_TARBALL" >&2
+    echo "Run: bash scripts/armhf16k-bootstrap-debian13.sh" >&2
     exit 3
 fi
-
-# dpkg-architecture warns when probing a foreign host architecture while the
-# caller's current CC still names the build architecture. We are only asking
-# it for the canonical tuple here and set the cross CC explicitly below.
-HOST_GNU_TYPE=$(dpkg-architecture -a"$HOST_ARCH" -qDEB_HOST_GNU_TYPE 2>/dev/null)
-BUILD_GNU_TYPE=$(dpkg-architecture -qDEB_BUILD_GNU_TYPE)
-
-for x in \
-    "$HOST_GNU_TYPE-gcc" \
-    "$HOST_GNU_TYPE-g++" \
-    "$HOST_GNU_TYPE-ar" \
-    "$HOST_GNU_TYPE-as" \
-    "$HOST_GNU_TYPE-ld" \
-    "$HOST_GNU_TYPE-nm" \
-    "$HOST_GNU_TYPE-objcopy" \
-    "$HOST_GNU_TYPE-objdump" \
-    "$HOST_GNU_TYPE-ranlib" \
-    "$HOST_GNU_TYPE-readelf" \
-    "$HOST_GNU_TYPE-strip"; do
-    need "$x"
-done
 
 # Resolve through apt-get's source command itself instead of inferring source
 # availability from apt-cache. --print-uris performs resolution without a
@@ -57,12 +44,9 @@ fi
 WORK="$WORK_ROOT/$SOURCE"
 FETCH="$WORK/fetch"
 SRC="$WORK/src"
+RESULT="$WORK/result"
 rm -rf "$WORK"
-mkdir -p "$FETCH" "$POOL"
-
-# Resolve cross-build dependencies using Debian's host-architecture mechanism.
-echo "Installing build dependencies for $SOURCE ($HOST_ARCH)"
-$SUDO apt-get -y --no-install-recommends --host-architecture="$HOST_ARCH" --only-source build-dep "$SOURCE"
+mkdir -p "$FETCH" "$POOL" "$RESULT"
 
 echo "Fetching Debian source: $SOURCE"
 (
@@ -89,53 +73,78 @@ export DEBEMAIL=${DEBEMAIL:-5424250+denuoweb@users.noreply.github.com}
 
 (
     cd "$SRC"
-
-    # Make the target toolchain explicit. Some older Debian packages partially
-    # honor DEB_HOST_GNU_TYPE but allow subprojects to fall back to the native
-    # compiler. Keep native compiler variables available for build-time tools.
-    export CC="$HOST_GNU_TYPE-gcc"
-    export CXX="$HOST_GNU_TYPE-g++"
-    export CPP="$HOST_GNU_TYPE-cpp"
-    export AR="$HOST_GNU_TYPE-ar"
-    export AS="$HOST_GNU_TYPE-as"
-    export LD="$HOST_GNU_TYPE-ld"
-    export NM="$HOST_GNU_TYPE-nm"
-    export OBJCOPY="$HOST_GNU_TYPE-objcopy"
-    export OBJDUMP="$HOST_GNU_TYPE-objdump"
-    export RANLIB="$HOST_GNU_TYPE-ranlib"
-    export READELF="$HOST_GNU_TYPE-readelf"
-    export STRIP="$HOST_GNU_TYPE-strip"
-    export CC_FOR_BUILD=${CC_FOR_BUILD:-gcc}
-    export CXX_FOR_BUILD=${CXX_FOR_BUILD:-g++}
-    export AR_FOR_BUILD=${AR_FOR_BUILD:-ar}
-    export LD_FOR_BUILD=${LD_FOR_BUILD:-ld}
-
-    # Build a version newer than the Debian base while preserving the source package.
     dch --local +16k --distribution unstable --force-distribution \
         "Rebuild ARMHF binaries for ${PAGE_SIZE}-byte host-page compatibility."
-
-    # User-side dpkg-buildflags extension. Also export the resolved LDFLAGS for
-    # build systems that consume the environment directly instead of querying
-    # dpkg-buildflags themselves.
-    export DEB_LDFLAGS_APPEND="${DEB_LDFLAGS_APPEND:+$DEB_LDFLAGS_APPEND }-Wl,-z,max-page-size=${PAGE_HEX}"
-    export LDFLAGS="$(dpkg-buildflags --get LDFLAGS)"
-
-    case " ${DEB_BUILD_OPTIONS:-} " in
-        *" nocheck "*) ;;
-        *) export DEB_BUILD_OPTIONS="${DEB_BUILD_OPTIONS:+$DEB_BUILD_OPTIONS }nocheck" ;;
-    esac
-
-    echo "Building architecture-dependent $SOURCE binaries for $HOST_ARCH"
-    echo "build=$BUILD_GNU_TYPE host=$HOST_GNU_TYPE"
-    echo "CC=$CC"
-    echo "LDFLAGS=$LDFLAGS"
-    dpkg-buildpackage -B -us -uc -a"$HOST_ARCH"
 )
 
-mapfile -t DEBS < <(find "$WORK" -maxdepth 1 -type f -name '*.deb' ! -name '*-dbgsym_*' -print | sort)
-if [[ ${#DEBS[@]} -eq 0 ]]; then
-    echo "No binary .deb files produced for $SOURCE" >&2
+# Persist the page-size policy in Debian packaging so it is active inside the
+# clean sbuild environment instead of depending on host environment leakage.
+python3 - "$SRC/debian/rules" "$PAGE_HEX" <<'PY'
+from pathlib import Path
+import sys
+
+rules = Path(sys.argv[1])
+page_hex = sys.argv[2]
+text = rules.read_text()
+marker = "# ARMHF16K injected build policy"
+if marker not in text:
+    lines = text.splitlines(keepends=True)
+    insert_at = 1 if lines and lines[0].startswith("#!") else 0
+    block = (
+        "# ARMHF16K injected build policy\n"
+        f"export DEB_LDFLAGS_APPEND += -Wl,-z,max-page-size={page_hex}\n"
+        "export DEB_BUILD_OPTIONS += nocheck\n"
+    )
+    lines.insert(insert_at, block)
+    rules.write_text("".join(lines))
+PY
+
+# Recreate a source package containing our hook and linker-policy changes.
+# For 3.0 (quilt) sources dpkg-source expects the original tarball next to the
+# source tree; keep Debian's downloaded orig archives intact for that purpose.
+find "$FETCH" -maxdepth 1 -type f -name '*.orig.tar.*' -exec cp -f {} "$WORK/" \;
+(
+    cd "$WORK"
+    dpkg-source -b "$SRC"
+)
+
+LOCAL_DSC=$(find "$WORK" -maxdepth 1 -type f -name '*.dsc' -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)
+if [[ -z "$LOCAL_DSC" || ! -f "$LOCAL_DSC" ]]; then
+    echo "Failed to create local ARMHF16K source package for $SOURCE" >&2
     exit 5
+fi
+
+echo "Building $SOURCE in isolated sbuild environment"
+echo "build=$BUILD_ARCH host=$HOST_ARCH page=$PAGE_SIZE"
+echo "sbuild base: $SBUILD_TARBALL"
+
+SBUILD_ARGS=(
+    --chroot-mode=unshare
+    --chroot="$SBUILD_TARBALL"
+    --build="$BUILD_ARCH"
+    --host="$HOST_ARCH"
+    --dist="$CODENAME"
+    --profiles=cross,nocheck
+    --no-arch-all
+    --no-run-lintian
+    --no-run-piuparts
+    --no-run-autopkgtest
+    --build-dir="$RESULT"
+    --add-depends-arch="crossbuild-essential-${HOST_ARCH}"
+)
+
+# Make earlier ARMHF16K builds available to dependency resolution without
+# installing them on the host. sbuild copies these into its transient archive.
+if compgen -G "$POOL/*.deb" >/dev/null; then
+    SBUILD_ARGS+=(--extra-package="$POOL")
+fi
+
+sbuild "${SBUILD_ARGS[@]}" "$LOCAL_DSC"
+
+mapfile -t DEBS < <(find "$RESULT" -maxdepth 1 -type f -name "*_${HOST_ARCH}.deb" ! -name '*-dbgsym_*' -print | sort)
+if [[ ${#DEBS[@]} -eq 0 ]]; then
+    echo "No ${HOST_ARCH} binary .deb files produced for $SOURCE" >&2
+    exit 6
 fi
 
 # Do not publish a source build unless every ARM ELF shipped by its binary
