@@ -1,0 +1,82 @@
+From: box86-16k contributors
+Subject: [PATCH 6/6] BRIDGE: watch live bridge slot 0x40070000
+
+The Steam failure now shows a live bridge entry at 0x40070000 changing
+in-place from the clock_gettime bridge to strlen before librt is unloaded.
+
+Instrument only that bridge slot. Record its initial wrapper/native pair at
+creation and first dispatch, then log pointer transitions from x86Int3 without
+enabling LOG_DEBUG. This keeps the +16k11 build diagnostic-only while making
+the first observed bridge mutation visible under BOX86_LOG=1.
+---
+ src/emu/x86int3.c | 27 +++++++++++++++++++++++++++
+ src/tools/bridge.c |  5 +++++
+ 2 files changed, 32 insertions(+)
+
+diff --git a/src/tools/bridge.c b/src/tools/bridge.c
+--- a/src/tools/bridge.c
++++ b/src/tools/bridge.c
+@@ -112,6 +112,11 @@ uintptr_t AddBridge(bridge_t* bridge, wrapper_t w, void* fnc, int N, const char*
+     b->b[sz].f = (uintptr_t)fnc;
+     b->b[sz].C3 = N?0xC2:0xC3;
+     b->b[sz].N = N;
++    if((uintptr_t)&b->b[sz].CC == 0x40070000) {
++        printf_log(LOG_NONE,
++            "WATCH_BRIDGE_INIT entry=%p wrapper=%p native=%p name=%s\n",
++            &b->b[sz].CC, (void*)w, fnc, name ? name : "(null)");
++    }
+     #ifdef HAVE_TRACE
+     if(name)
+         addBridgeName(fnc, name);
+diff --git a/src/emu/x86int3.c b/src/emu/x86int3.c
+--- a/src/emu/x86int3.c
++++ b/src/emu/x86int3.c
+@@ -20,5 +20,6 @@
+ #include "x86primop.h"
+ #include "x86trace.h"
+ #include "wrapper.h"
++#include "bridge_private.h"
+ #include "box86context.h"
+ #include "librarian.h"
+@@ -62,6 +63,9 @@ x86emu_t* x86emu_fork(x86emu_t* emu, int forktype)
+ }
+ void emit_signal(x86emu_t* emu, int sig, void* addr, int code); // in signals.c
+ extern int errno;
++static wrapper_t watch_w = NULL;
++static uintptr_t watch_f = 0;
++
+ void x86Int3(x86emu_t* emu)
+ {
+     if(Peek(emu, 0)=='S' && Peek(emu, 1)=='C') // Signature for "Out of x86 door"
+@@ -80,6 +84,29 @@ void x86Int3(x86emu_t* emu)
+             RESET_FLAGS(emu);
+             wrapper_t w = (wrapper_t)addr;
+             addr = Fetch32(emu);
++            if(R_EIP - 11 == 0x40070000) {
++                onebridge_t* b = (onebridge_t*)0x40070000;
++                if(!watch_f) {
++                    watch_w = b->w;
++                    watch_f = b->f;
++                    printf_log(LOG_NONE,
++                        "WATCH_BRIDGE_BASE wrapper=%p native=%p name=%s\n",
++                        (void*)watch_w, (void*)watch_f,
++                        GetNativeName((void*)watch_f));
++                } else if(b->w != watch_w || b->f != watch_f) {
++                    printf_log(LOG_NONE,
++                        "WATCH_BRIDGE_CHANGED "
++                        "wrapper=%p->%p native=%p(%s)->%p(%s) "
++                        "ret=%p arg1=%p\n",
++                        (void*)watch_w, (void*)b->w,
++                        (void*)watch_f, GetNativeName((void*)watch_f),
++                        (void*)b->f, GetNativeName((void*)b->f),
++                        *(void**)R_ESP,
++                        *(void**)(R_ESP + 4));
++                    watch_w = b->w;
++                    watch_f = b->f;
++                }
++            }
+             /* This party can be used to trace only 1 specific lib (but it is quite slow)
+             elfheader_t *h = FindElfAddress(my_context, *(uintptr_t*)(R_ESP));
+             int have_trace = 0;
+-- 
+2.39.5
