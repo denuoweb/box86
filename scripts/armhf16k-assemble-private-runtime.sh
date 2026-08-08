@@ -7,7 +7,7 @@ MESA_ROOT=${ARMHF16K_MESA_ROOT:-"$ROOT/armhf16k/private/mesa-root"}
 GLVND_ROOT=${ARMHF16K_GLVND_ROOT:-"$ROOT/armhf16k/private/glvnd-root"}
 WORK=${ARMHF16K_RUNTIME_WORK:-"$ROOT/armhf16k/work/private-runtime"}
 DIST=${DISTDIR:-"$ROOT/dist"}
-VERSION=${ARMHF16K_RUNTIME_VERSION:-1.0+16k4}
+VERSION=${ARMHF16K_RUNTIME_VERSION:-1.0+16k5}
 PREFIX=/usr/lib/box86-16k/native16k
 PKGROOT="$WORK/pkg"
 NATIVE="$PKGROOT$PREFIX"
@@ -28,7 +28,7 @@ copy_lib_tree() {
 
 # Pull the validated low-level libraries out of their .debs rather than
 # replacing Debian's system copies. Include all runtime libxcb packages plus
-# zlib, libbsd, libXau and libXdmcp.
+# the native dependencies encountered by Steam/Box86 on the 16K host.
 TMP="$WORK/extract"
 mkdir -p "$TMP"
 found_zlib=0
@@ -36,6 +36,8 @@ found_bsd=0
 found_xau=0
 found_xdmcp=0
 found_xcb=0
+found_xi=0
+found_asyncns=0
 for deb in "$POOL"/*.deb; do
     [ -f "$deb" ] || continue
     pkg=$(dpkg-deb -f "$deb" Package)
@@ -44,6 +46,8 @@ for deb in "$POOL"/*.deb; do
         libbsd0) found_bsd=1 ;;
         libxau6) found_xau=1 ;;
         libxdmcp6) found_xdmcp=1 ;;
+        libxi6) found_xi=1 ;;
+        libasyncns0) found_asyncns=1 ;;
         libxcb*-dev|*-dbgsym) continue ;;
         libxcb*) found_xcb=1 ;;
         *) continue ;;
@@ -55,9 +59,9 @@ for deb in "$POOL"/*.deb; do
     copy_lib_tree "$dir/usr/lib/arm-linux-gnueabihf"
 done
 
-[[ $found_zlib -eq 1 && $found_bsd -eq 1 && $found_xau -eq 1 && $found_xdmcp -eq 1 && $found_xcb -eq 1 ]] || {
-    echo "Low-level package pool is incomplete (zlib=$found_zlib bsd=$found_bsd xau=$found_xau xdmcp=$found_xdmcp xcb=$found_xcb)." >&2
-    echo "Build stages zlib, libbsd, libxau, libxdmcp and libxcb first." >&2
+[[ $found_zlib -eq 1 && $found_bsd -eq 1 && $found_xau -eq 1 && $found_xdmcp -eq 1 && $found_xcb -eq 1 && $found_xi -eq 1 && $found_asyncns -eq 1 ]] || {
+    echo "Low-level package pool is incomplete (zlib=$found_zlib bsd=$found_bsd xau=$found_xau xdmcp=$found_xdmcp xcb=$found_xcb xi=$found_xi asyncns=$found_asyncns)." >&2
+    echo "Build stages zlib, libbsd, libxau, libxdmcp, libxcb, libxi and libasyncns first." >&2
     exit 4
 }
 
@@ -98,21 +102,23 @@ while IFS= read -r -d '' file; do
     fi
 done < <(find "$NATIVE" -type f -print0)
 
-# Sanity-check the hard dependencies that originally stopped steamui.so and
-# the direct native-loader closure discovered during validation.
-for soname in libGL.so.1 libGLX.so.0 libEGL.so.1 libxcb.so.1 libXau.so.6 libXdmcp.so.6 libz.so.1; do
+# Sanity-check the hard dependencies that have stopped Steam/steamui.so during
+# real 16K-host validation.
+for soname in libGL.so.1 libGLX.so.0 libEGL.so.1 libxcb.so.1 libXau.so.6 libXdmcp.so.6 libXi.so.6 libasyncns.so.0 libz.so.1; do
     find "$NATIVE" -maxdepth 1 \( -type f -o -type l \) -name "$soname" -print -quit | grep -q . || {
         echo "Private runtime is missing $soname" >&2
         exit 5
     }
 done
 
-# Mesa intentionally installs v3d_dri.so as a symlink to the shared DRI driver
-# implementation (libdril_dri.so). Accept either a regular file or symlink, but
-# require the resolved target to exist and remain inside the private runtime.
-found_pi_dri=0
+# Mesa's dril target creates these as symlinks to libdril_dri.so. Steam's X/GLX
+# path on Pi5 has been observed requesting vc4_dri.so, while V3D is the render
+# driver, so require both aliases and ensure they resolve inside this runtime.
 for driver in "$NATIVE/dri/v3d_dri.so" "$NATIVE/dri/vc4_dri.so"; do
-    [[ -e "$driver" || -L "$driver" ]] || continue
+    [[ -e "$driver" || -L "$driver" ]] || {
+        echo "Private Mesa runtime is missing Pi DRI driver: $driver" >&2
+        exit 5
+    }
     target=$(readlink -f -- "$driver" 2>/dev/null || true)
     [[ -n "$target" && -f "$target" ]] || {
         echo "Pi DRI driver is a broken link: $driver" >&2
@@ -126,13 +132,7 @@ for driver in "$NATIVE/dri/v3d_dri.so" "$NATIVE/dri/vc4_dri.so"; do
             ;;
     esac
     echo "Verified Pi DRI driver: $driver -> $target"
-    found_pi_dri=1
-    break
 done
-[[ $found_pi_dri -eq 1 ]] || {
-    echo "Private Mesa runtime has no Pi V3D/VC4 DRI driver" >&2
-    exit 5
-}
 
 cat >"$PKGROOT/DEBIAN/control" <<EOF
 Package: box86-armhf16k-runtime
@@ -142,7 +142,7 @@ Maintainer: DenuoWeb <5424250+denuoweb@users.noreply.github.com>
 Depends: libc6 (>= 2.38), libdrm2, libx11-6, libxext6, libx11-xcb1, libwayland-client0, libwayland-server0, libexpat1, libzstd1, libgcc-s1, libstdc++6
 Description: Private 16K-compatible ARMHF native runtime for Box86
  Provides Box86 with a private ARMHF GL/X11 dependency closure for 16 KiB-page
- hosts. Includes Pi5 V3D/V3DV Mesa, GLVND, and rebuilt low-level libraries.
+ hosts. Includes Pi V3D/VC4/V3DV Mesa, GLVND, and rebuilt low-level libraries.
 EOF
 
 DEB="$DIST/box86-armhf16k-runtime_${VERSION}_armhf.deb"
