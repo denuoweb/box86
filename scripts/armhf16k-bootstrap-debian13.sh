@@ -25,6 +25,12 @@ if ! dpkg --print-foreign-architectures | grep -qx "$HOST_ARCH"; then
     $SUDO dpkg --add-architecture "$HOST_ARCH"
 fi
 
+# Test source-package resolution through the same apt-get source operation the
+# rebuilder uses. --print-uris performs resolution without downloading files.
+source_resolves() {
+    apt-get --print-uris --only-source source "$1" >/dev/null 2>&1
+}
+
 # APT requires Signed-By to be identical for entries describing the same
 # repository URI/suite. Raspberry Pi OS/Debian images can use either the .pgp
 # or .gpg archive-keyring path, so inherit the path already present in the
@@ -54,9 +60,9 @@ fi
 # Debian source metadata is separate from binary package metadata. Modern
 # Debian uses deb822 .sources files; install a source-only companion rather
 # than modifying the user's existing binary repository configuration.
-# Always rewrite our companion file before apt-get update so a previously
-# generated entry with a mismatched Signed-By value can repair itself.
-if ! apt-cache --only-source showsrc zlib 2>/dev/null | grep -q '^Package: zlib$'; then
+# Always rewrite our companion file when source resolution is unavailable so a
+# previously generated entry with a mismatched Signed-By value repairs itself.
+if ! source_resolves zlib; then
     echo "Enabling Debian source repositories in $DEBIAN_SRC_FILE"
     echo "Using Debian archive keyring: $DEBIAN_KEYRING"
     tmp=$(mktemp)
@@ -91,20 +97,17 @@ $SUDO apt-get install -y --no-install-recommends \
     gzip \
     apt-utils
 
-# apt-cache returns success for normal operation even if no matching source
-# record was printed, so validate output. Options must precede the showsrc
-# command; --only-source restricts matching to source package names.
-if ! apt-cache --only-source showsrc zlib 2>/dev/null | grep -q '^Package: zlib$'; then
+if ! source_resolves zlib; then
     cat >&2 <<MSG
 Debian source metadata is still unavailable after apt-get update.
-Expected a source record for zlib from:
+Expected apt-get to resolve source package zlib from:
   $DEBIAN_SRC_FILE
 Inspect it with:
   cat $DEBIAN_SRC_FILE
-  apt-cache --only-source showsrc zlib
+  apt-get --print-uris --only-source source zlib
 MSG
     exit 3
 fi
 
-echo "Verified Debian source metadata: zlib"
+echo "Verified Debian source resolution: zlib"
 echo "ARMHF16K build prerequisites are installed."
