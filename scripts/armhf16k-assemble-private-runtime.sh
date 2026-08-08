@@ -71,7 +71,6 @@ fi
 if [[ -d "$MESA_ROOT/usr/share/vulkan/icd.d" ]]; then
     mkdir -p "$NATIVE/vulkan/icd.d"
     cp -a "$MESA_ROOT/usr/share/vulkan/icd.d"/. "$NATIVE/vulkan/icd.d"/
-    # Private runtime must not point Vulkan back at a stock system DSO.
     find "$NATIVE/vulkan/icd.d" -type f -name '*.json' -exec \
         sed -i "s#/usr/lib/arm-linux-gnueabihf/#${PREFIX}/#g" {} +
 fi
@@ -85,8 +84,19 @@ EOF
 
 python3 "$ROOT/scripts/armhf16k-verify-tree.py" --page-size 16384 "$NATIVE"
 
-# Sanity-check that the runtime contains the hard dependencies that originally
-# stopped steamui.so.
+# The point of the Pi5-specific Mesa build is to delete the generic LLVM/libelf
+# closure, not merely hide it. Reject either dependency anywhere in the private
+# runtime before packaging.
+while IFS= read -r -d '' file; do
+    needed=$(readelf -dW "$file" 2>/dev/null || true)
+    if printf '%s\n' "$needed" | grep -Eq 'Shared library: \[(libLLVM[^]]*|libelf\.so[^]]*)\]'; then
+        echo "Forbidden generic graphics dependency in private runtime: $file" >&2
+        printf '%s\n' "$needed" | grep NEEDED >&2 || true
+        exit 5
+    fi
+done < <(find "$NATIVE" -type f -print0)
+
+# Sanity-check the hard dependencies that originally stopped steamui.so.
 for soname in libGL.so.1 libGLX.so.0 libEGL.so.1 libxcb.so.1 libXau.so.6 libz.so.1; do
     find "$NATIVE" -maxdepth 1 \( -type f -o -type l \) -name "$soname" -print -quit | grep -q . || {
         echo "Private runtime is missing $soname" >&2
