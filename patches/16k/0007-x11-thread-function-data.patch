@@ -11,9 +11,9 @@ read each native callback slot, create an x86 bridge for the native function,
 and publish the bridge address through the shadow variable. Refresh the
 shadows both for guest XInitThreads calls and for BOX86_X11THREADS startup.
 ---
- src/wrapped/wrappedlibx11.c         | 53 +++++++++++++++++++++++++++++++++++++--
+ src/wrapped/wrappedlibx11.c         | 50 ++++++++++++++++++++++++++++++++++++++++++++++++--
  src/wrapped/wrappedlibx11_private.h | 16 ++++++++--------
- 2 files changed, 59 insertions(+), 10 deletions(-)
+ 2 files changed, 56 insertions(+), 10 deletions(-)
 
 diff --git a/src/wrapped/wrappedlibx11.c b/src/wrapped/wrappedlibx11.c
 --- a/src/wrapped/wrappedlibx11.c
