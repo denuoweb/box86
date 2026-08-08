@@ -44,19 +44,19 @@ Several important ARMHF components were already 16K-compatible and are intention
 
 ## Bootstrap
 
-The builder is intended to run on Debian 13 arm64 with ARMHF enabled:
+The builder is intended to run on Debian 13 arm64 on a machine whose kernel/CPU can execute Debian ARMHF binaries directly:
 
 ```bash
 bash scripts/armhf16k-bootstrap-debian13.sh
 ```
 
-The bootstrap enables matching Debian source repositories when necessary, installs `sbuild` and its unshare backend prerequisites, and creates a reusable clean arm64 build root under:
+The bootstrap enables matching Debian source repositories when necessary, installs `sbuild`, `arch-test`, and the unshare-backend prerequisites, verifies native ARMHF execution, and creates a reusable clean ARMHF build root under:
 
 ```text
-~/.cache/sbuild/trixie-arm64.tar.gz
+~/.cache/sbuild/trixie-armhf.tar.gz
 ```
 
-Build dependencies are **not** installed into the normal host package database. Each source is cross-built in an ephemeral sbuild environment with build architecture `arm64` and host architecture `armhf`. This avoids Multi-Arch development-package collisions on the Raspberry Pi host.
+Build dependencies are **not** installed into the normal host package database. Each source is built natively as ARMHF inside an ephemeral ARMHF sbuild environment. This avoids both host Multi-Arch development-package collisions and Debian cross-build dependency graphs that are `bd-uninstallable` even when the same package builds normally on ARMHF.
 
 The unshare backend requires unprivileged user namespaces. The bootstrap checks this before declaring the environment ready.
 
@@ -85,7 +85,7 @@ For each stage the rebuilder:
 1. downloads the configured Debian source package on the host;
 2. applies any source-specific ARMHF16K hook;
 3. creates a local `+16k1` source revision with the 16K linker policy persisted in `debian/rules`;
-4. invokes `sbuild --build=arm64 --host=armhf` in the clean unshare root;
+4. invokes native `sbuild --arch=armhf` in the clean unshare root;
 5. exposes previously built packages from `armhf16k/repo/pool/` to sbuild through its transient extra-package archive;
 6. validates every ARM ELF in every generated `.deb` before publishing it.
 
