@@ -1,0 +1,29 @@
+From: box86-16k contributors
+Subject: [PATCH 5/5] BRIDGE: size bridge bricks to the host page
+
+Box86 allocates bridge thunks in hard-coded 4K bricks.  That matches the
+traditional host page size, but on a 16K host each 4K mmap/munmap request is
+backed by an entire 16K kernel page while Box86 only accounts for 4K of it.
+
+Box64 already sizes NBRICK from box64_pagesize.  Do the equivalent in Box86 so
+a bridge brick always occupies exactly one host page.  On 4K hosts this is a
+no-op; on 16K hosts it keeps bridge allocation, protection tracking and
+unmapping on the same granularity as the kernel.
+---
+ src/tools/bridge.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/tools/bridge.c b/src/tools/bridge.c
+--- a/src/tools/bridge.c
++++ b/src/tools/bridge.c
+@@ -21,7 +21,7 @@
+ 
+ KHASH_MAP_INIT_INT(bridgemap, uintptr_t)
+ 
+-#define NBRICK  (4096/sizeof(onebridge_t))
++#define NBRICK  (box86_pagesize/sizeof(onebridge_t))
+ typedef struct brick_s brick_t;
+ typedef struct brick_s {
+     onebridge_t *b;
+-- 
+2.39.5
