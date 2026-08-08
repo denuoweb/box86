@@ -1,3 +1,12 @@
+box86-16k (0.3.8+git20260807.0579f8b+16k11) unstable; urgency=medium
+
+  * Add targeted WATCH_BRIDGE diagnostics for the live bridge entry at
+    0x40070000 without changing bridge lifetime, unmapping, or PLT resolution.
+  * Record the initial wrapper/native pair and log pointer transitions during
+    x86Int3 dispatch at LOG_NONE so BOX86_LOG=1 is sufficient for the probe.
+
+ -- DenuoWeb <5424250+denuoweb@users.noreply.github.com>  Sat, 08 Aug 2026 09:46:00 -0700
+
 box86-16k (0.3.8+git20260807.0579f8b+16k10) unstable; urgency=medium
 
   * Preserve i386 4K madvise semantics on 16K hosts, including raw syscall 219.
