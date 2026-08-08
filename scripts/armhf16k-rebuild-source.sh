@@ -25,10 +25,9 @@ if ! dpkg --print-foreign-architectures | grep -qx "$HOST_ARCH" && [[ "$(dpkg --
     exit 3
 fi
 
-# apt-cache showsrc exits successfully even when no source record was printed.
-# Require an exact source-package record so we fail before apt-get build-dep
-# with a misleading "Unable to find a source package" error.
-if ! apt-cache showsrc --only-source "$SOURCE" 2>/dev/null | grep -Fqx "Package: $SOURCE"; then
+# apt-cache returns success for normal operation even when no source record
+# matched. Options must precede showsrc, so require an exact source record.
+if ! apt-cache --only-source showsrc "$SOURCE" 2>/dev/null | grep -Fqx "Package: $SOURCE"; then
     echo "APT has no source record for '$SOURCE'. Run: bash scripts/armhf16k-bootstrap-debian13.sh" >&2
     exit 3
 fi
@@ -41,12 +40,12 @@ mkdir -p "$FETCH" "$POOL"
 
 # Resolve cross-build dependencies using Debian's host-architecture mechanism.
 echo "Installing build dependencies for $SOURCE ($HOST_ARCH)"
-$SUDO apt-get build-dep -y --no-install-recommends --host-architecture="$HOST_ARCH" --only-source "$SOURCE"
+$SUDO apt-get -y --no-install-recommends --host-architecture="$HOST_ARCH" --only-source build-dep "$SOURCE"
 
 echo "Fetching Debian source: $SOURCE"
 (
     cd "$FETCH"
-    apt-get source --download-only --only-source "$SOURCE"
+    apt-get --download-only --only-source source "$SOURCE"
 )
 
 DSC=$(find "$FETCH" -maxdepth 1 -type f -name '*.dsc' -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)
