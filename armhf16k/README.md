@@ -50,19 +50,21 @@ The builder targets Debian 13 arm64 on Raspberry Pi 5:
 bash scripts/armhf16k-bootstrap-debian13.sh
 ```
 
-The bootstrap enables matching Debian source repositories when necessary, installs `sbuild` and QEMU linux-user support, and creates a reusable clean ARMHF build root under:
+A 16K arm64 kernel can execute AArch32 instructions, but stock Debian ARMHF bootstrap binaries can still contain 4K-only PT_LOAD layouts. That creates a bootstrap cycle: the ARMHF package set must be rebuilt for 16K before all of its own tools can be loaded directly by the host kernel.
+
+ARMHF16K breaks that cycle entirely in userspace:
+
+1. `debootstrap --foreign --arch=armhf` downloads and extracts the base ARMHF filesystem without executing ARMHF programs;
+2. PRoot runs debootstrap's second stage with `-q qemu-arm`, so every guest execution is translated through QEMU rather than the host ELF loader;
+3. the completed base is cached at:
 
 ```text
-~/.cache/sbuild/trixie-armhf.tar.gz
+~/.cache/armhf16k/trixie-armhf-proot.tar.gz
 ```
 
-A 16K arm64 kernel can execute ARMHF in principle, but stock Debian ARMHF bootstrap binaries may themselves have 4K-only PT_LOAD layouts. That creates a bootstrap cycle: the ARMHF package set must be rebuilt for 16K before all of its own build tools can be executed natively. ARMHF16K breaks that cycle with a temporary QEMU ARM binfmt registration while the clean root and packages are being built.
+PRoot provides a userspace chroot and binfmt layer. Kernel `binfmt_misc`, sbuild user namespaces, and host Multi-Arch build-dependency installation are not required by the current build path.
 
-The temporary handler is named `armhf16k-qemu-arm`. It uses Debian's QEMU ARM linux-user interpreter and is removed by traps after bootstrap/build. It is intentionally not left enabled, because the final runtime is supposed to execute the rebuilt ARMHF libraries directly on the 16K kernel rather than through QEMU.
-
-Build dependencies are **not** installed into the normal host package database. Each source is built as ARMHF inside an ephemeral ARMHF sbuild environment, with QEMU used only as the execution bridge for stock 4K-oriented build tools. This avoids both host Multi-Arch development-package collisions and Debian cross-build dependency graphs that are `bd-uninstallable`.
-
-The unshare backend requires unprivileged user namespaces. The bootstrap checks this before declaring the environment ready.
+QEMU is build-time scaffolding only. Produced packages are normal ARMHF binaries and must pass the direct 16K ELF verifier before they are published.
 
 ## Audit the installed ARMHF closure
 
@@ -88,13 +90,14 @@ For each stage the rebuilder:
 
 1. downloads the configured Debian source package on the host;
 2. applies any source-specific ARMHF16K hook;
-3. creates a local `+16k1` source revision with the 16K linker policy persisted in `debian/rules`;
-4. enables the private QEMU ARM binfmt temporarily and invokes `sbuild --arch=armhf` in the clean unshare root;
-5. exposes previously built packages from `armhf16k/repo/pool/` to sbuild through its transient extra-package archive;
-6. removes the temporary QEMU handler;
-7. validates every ARM ELF in every generated `.deb` before publishing it.
+3. derives a local package version from the current ARMHF binary candidate and appends the ARMHF16K revision;
+4. persists the 16K linker policy in `debian/rules`;
+5. extracts a disposable copy of the cached ARMHF filesystem;
+6. runs `apt-get build-dep` and `dpkg-buildpackage -B` inside PRoot with `-q qemu-arm`;
+7. exposes the local `armhf16k/repo/` to the guest APT resolver so earlier rebuilt packages can satisfy dependencies;
+8. validates every ARM ELF in every generated `.deb` before publishing it.
 
-The QEMU step is build-time scaffolding only. A package is not accepted merely because it works under QEMU; it must pass the direct 16K PT_LOAD verifier before entering the local repository.
+The local revision defaults to `16k2`. For Debian binary NMUs such as `...+b1`, the rebuilder bases the local version on that full binary candidate before appending `+16k2`, so APT considers the ARMHF16K package newer than the binary it replaces.
 
 The source build is validated before its `.deb` files are copied into:
 
@@ -110,7 +113,7 @@ START_AT=libxcb bash scripts/armhf16k-build-all.sh
 STOP_AFTER=elfutils bash scripts/armhf16k-build-all.sh
 ```
 
-`llvm-toolchain-19` is intentionally late in the build because it is much larger than the other source packages.
+`llvm-toolchain-19` is intentionally late in the build because it is much larger than the other source packages and will be substantially slower under QEMU user-mode than the smaller stages.
 
 ## Create and enable the local repository
 
@@ -129,11 +132,11 @@ The repository is a flat local APT repository marked trusted because it is gener
 bash scripts/armhf16k-install-targets.sh
 ```
 
-The installer requests only the binary packages observed as incompatible. APT resolves same-source exact-version dependencies from the local repository when required. After installation, the recursive auditor runs again and fails if any GL/EGL closure library is still 16K-incompatible.
+The installer requests only the binary packages observed as incompatible. APT resolves same-source dependencies from the local repository when required. After installation, the recursive auditor runs again and fails if any GL/EGL closure library is still 16K-incompatible.
 
 ## Package updates
 
-A later Debian security or point update can supersede a local `+16k` package. That is desirable for package correctness but may reintroduce 4K-only ELF layout. Re-run the audit after ARMHF library upgrades. If a new Debian version is incompatible, rebuild that source package again so the local version is based on the new Debian source.
+Re-run the audit after ARMHF library upgrades. If a newer Debian binary/source becomes the candidate and is not 16K-compatible, rebuild that source again; the rebuilder derives its local revision from the current candidate so the rebuilt package follows the Debian update rather than permanently pinning an older base.
 
 ## Scope
 
