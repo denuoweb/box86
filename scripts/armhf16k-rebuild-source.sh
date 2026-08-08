@@ -16,7 +16,7 @@ if [[ -z "$SOURCE" ]]; then
 fi
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing tool: $1" >&2; exit 2; }; }
-for x in apt-get dpkg dpkg-source dpkg-buildpackage dpkg-parsechangelog dch python3 readelf; do
+for x in apt-get dpkg dpkg-architecture dpkg-source dpkg-buildpackage dpkg-parsechangelog dch python3 readelf; do
     need "$x"
 done
 
@@ -24,6 +24,24 @@ if ! dpkg --print-foreign-architectures | grep -qx "$HOST_ARCH" && [[ "$(dpkg --
     echo "$HOST_ARCH is not enabled as a foreign architecture. Run: bash scripts/armhf16k-bootstrap-debian13.sh" >&2
     exit 3
 fi
+
+HOST_GNU_TYPE=$(dpkg-architecture -a"$HOST_ARCH" -qDEB_HOST_GNU_TYPE)
+BUILD_GNU_TYPE=$(dpkg-architecture -qDEB_BUILD_GNU_TYPE)
+
+for x in \
+    "$HOST_GNU_TYPE-gcc" \
+    "$HOST_GNU_TYPE-g++" \
+    "$HOST_GNU_TYPE-ar" \
+    "$HOST_GNU_TYPE-as" \
+    "$HOST_GNU_TYPE-ld" \
+    "$HOST_GNU_TYPE-nm" \
+    "$HOST_GNU_TYPE-objcopy" \
+    "$HOST_GNU_TYPE-objdump" \
+    "$HOST_GNU_TYPE-ranlib" \
+    "$HOST_GNU_TYPE-readelf" \
+    "$HOST_GNU_TYPE-strip"; do
+    need "$x"
+done
 
 # Resolve through apt-get's source command itself instead of inferring source
 # availability from apt-cache. --print-uris performs resolution without a
@@ -57,11 +75,38 @@ fi
 
 dpkg-source -x "$DSC" "$SRC"
 
+HOOK="$ROOT/armhf16k/hooks/$SOURCE.sh"
+if [[ -f "$HOOK" ]]; then
+    echo "Applying ARMHF16K source hook: $SOURCE"
+    bash "$HOOK" "$SRC"
+fi
+
 export DEBFULLNAME=${DEBFULLNAME:-DenuoWeb ARMHF16K Builder}
 export DEBEMAIL=${DEBEMAIL:-5424250+denuoweb@users.noreply.github.com}
 
 (
     cd "$SRC"
+
+    # Make the target toolchain explicit. Some older Debian packages partially
+    # honor DEB_HOST_GNU_TYPE but allow subprojects to fall back to the native
+    # compiler. Keep native compiler variables available for build-time tools.
+    export CC="$HOST_GNU_TYPE-gcc"
+    export CXX="$HOST_GNU_TYPE-g++"
+    export CPP="$HOST_GNU_TYPE-cpp"
+    export AR="$HOST_GNU_TYPE-ar"
+    export AS="$HOST_GNU_TYPE-as"
+    export LD="$HOST_GNU_TYPE-ld"
+    export NM="$HOST_GNU_TYPE-nm"
+    export OBJCOPY="$HOST_GNU_TYPE-objcopy"
+    export OBJDUMP="$HOST_GNU_TYPE-objdump"
+    export RANLIB="$HOST_GNU_TYPE-ranlib"
+    export READELF="$HOST_GNU_TYPE-readelf"
+    export STRIP="$HOST_GNU_TYPE-strip"
+    export CC_FOR_BUILD=${CC_FOR_BUILD:-gcc}
+    export CXX_FOR_BUILD=${CXX_FOR_BUILD:-g++}
+    export AR_FOR_BUILD=${AR_FOR_BUILD:-ar}
+    export LD_FOR_BUILD=${LD_FOR_BUILD:-ld}
+
     # Build a version newer than the Debian base while preserving the source package.
     dch --local +16k --distribution unstable --force-distribution \
         "Rebuild ARMHF binaries for ${PAGE_SIZE}-byte host-page compatibility."
@@ -78,6 +123,8 @@ export DEBEMAIL=${DEBEMAIL:-5424250+denuoweb@users.noreply.github.com}
     esac
 
     echo "Building architecture-dependent $SOURCE binaries for $HOST_ARCH"
+    echo "build=$BUILD_GNU_TYPE host=$HOST_GNU_TYPE"
+    echo "CC=$CC"
     echo "LDFLAGS=$LDFLAGS"
     dpkg-buildpackage -B -us -uc -a"$HOST_ARCH"
 )
