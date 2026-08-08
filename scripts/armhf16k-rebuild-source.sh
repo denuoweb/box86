@@ -25,8 +25,11 @@ if ! dpkg --print-foreign-architectures | grep -qx "$HOST_ARCH" && [[ "$(dpkg --
     exit 3
 fi
 
-if ! apt-cache showsrc "$SOURCE" >/dev/null 2>&1; then
-    echo "APT cannot resolve source package '$SOURCE'. Check deb-src configuration." >&2
+# apt-cache showsrc exits successfully even when no source record was printed.
+# Require an exact source-package record so we fail before apt-get build-dep
+# with a misleading "Unable to find a source package" error.
+if ! apt-cache showsrc --only-source "$SOURCE" 2>/dev/null | grep -Fqx "Package: $SOURCE"; then
+    echo "APT has no source record for '$SOURCE'. Run: bash scripts/armhf16k-bootstrap-debian13.sh" >&2
     exit 3
 fi
 
