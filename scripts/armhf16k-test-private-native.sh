@@ -41,6 +41,8 @@ libs=(
     "$PREFIX/libXau.so.6"
     "$PREFIX/libXdmcp.so.6"
     "$PREFIX/libxcb.so.1"
+    "$PREFIX/libXi.so.6"
+    "$PREFIX/libasyncns.so.0"
     "$PREFIX/libGLdispatch.so.0"
     "$PREFIX/libGLX_mesa.so.0"
     "$PREFIX/libEGL_mesa.so.0"
@@ -48,6 +50,16 @@ libs=(
     "$PREFIX/libEGL.so.1"
     "$PREFIX/libGL.so.1"
 )
+
+# libpulse itself is supplied by Debian and was observed to be loadable on the
+# 16K host until its 4K-only libasyncns dependency was reached. Re-test the real
+# system libpulse against the private asyncns replacement when present.
+for pulse in /usr/lib/arm-linux-gnueabihf/libpulse.so.0 /lib/arm-linux-gnueabihf/libpulse.so.0; do
+    if [[ -e "$pulse" ]]; then
+        libs+=("$pulse")
+        break
+    fi
+done
 
 for gallium in "$PREFIX"/libgallium*.so*; do
     [[ -f "$gallium" ]] && libs+=("$gallium")
