@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
+trap 'rc=$?; echo "ERROR: ${BASH_SOURCE[0]}:${LINENO}: command failed (rc=$rc): $BASH_COMMAND" >&2; exit $rc' ERR
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 SUDO=${SUDO:-sudo}
 DIST=${DISTDIR:-"$ROOT/dist"}
 
-DEB=$(find "$DIST" -maxdepth 1 -type f -name 'box86-armhf16k-runtime_*_armhf.deb' -printf '%T@ %p\n' \
-    | sort -nr | head -n1 | cut -d' ' -f2-)
+mapfile -t RUNTIME_DEBS < <(find "$DIST" -maxdepth 1 -type f -name 'box86-armhf16k-runtime_*_armhf.deb' -printf '%T@ %p\n' | sort -nr)
+DEB=
+if [[ ${#RUNTIME_DEBS[@]} -gt 0 ]]; then
+    DEB=${RUNTIME_DEBS[0]#* }
+fi
 [[ -n "$DEB" && -f "$DEB" ]] || {
     echo "Private ARMHF16K runtime package not found in $DIST" >&2
     echo "Build stage private-runtime first." >&2
