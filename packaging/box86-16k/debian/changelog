@@ -59,7 +59,7 @@ box86-16k (0.3.8+git20260807.0579f8b+16k8) unstable; urgency=medium
   * Declare box86-16k as a Conflicts/Replaces successor to the legacy
     box86-steam16k package so upgrades can replace its binfmt file cleanly.
   * Install Box86's upstream /etc/box86.box86rc database explicitly so Steam gets
-    its intended BOX86_NOGTK, strongmem, callret and emulated-library overrides).
+    its intended BOX86_NOGTK, strong-memory, callret, and emulated-library profile.
   * Add the ARMHF16K native-library closure auditor and ship the observed Debian 13
     Pi 5 incompatible-library manifest with the runtime package.
   * Keep the validated zlib/libbsd/libXau/libXdmcp/libxcb ARMHF cross-build path.
