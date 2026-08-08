@@ -4,7 +4,7 @@ box86-16k (0.3.8+git20260807.0579f8b+16k14) unstable; urgency=medium
     a usable display in the current 16K Steam environment.
   * Preserve caller overrides so PROTON_USE_XALIA can still be explicitly set.
 
- -- DenuoWeb <5424250+denuoweb@users.noreply.github.com>  Sat, 08 Aug 2026 16:14:00 -0700
+ -- Jaron Rosenau <jaron@rosenau.info>  Sat, 08 Aug 2026 16:14:00 -0700
 
 box86-16k (0.3.8+git20260807.0579f8b+16k13) unstable; urgency=medium
 
@@ -15,7 +15,7 @@ box86-16k (0.3.8+git20260807.0579f8b+16k13) unstable; urgency=medium
   * Remove the temporary DATAM shadow copies and WATCH_X11_THREAD_BRIDGES probe
     used to validate the original diagnosis.
 
- -- DenuoWeb <5424250+denuoweb@users.noreply.github.com>  Sat, 08 Aug 2026 15:49:00 -0700
+ -- Jaron Rosenau <jaron@rosenau.info>  Sat, 08 Aug 2026 15:49:00 -0700
 
 box86-16k (0.3.8+git20260807.0579f8b+16k12) unstable; urgency=medium
 
@@ -24,7 +24,7 @@ box86-16k (0.3.8+git20260807.0579f8b+16k12) unstable; urgency=medium
   * Refresh the X11 thread callback bridges after XInitThreads, including the
     BOX86_X11THREADS startup path, and emit WATCH_X11_THREAD_BRIDGES.
 
- -- DenuoWeb <5424250+denuoweb@users.noreply.github.com>  Sat, 08 Aug 2026 14:05:00 -0700
+ -- Jaron Rosenau <jaron@rosenau.info>  Sat, 08 Aug 2026 14:05:00 -0700
 
 box86-16k (0.3.8+git20260807.0579f8b+16k11) unstable; urgency=medium
 
@@ -33,7 +33,7 @@ box86-16k (0.3.8+git20260807.0579f8b+16k11) unstable; urgency=medium
   * Record the initial wrapper/native pair and log pointer transitions during
     x86Int3 dispatch at LOG_NONE so BOX86_LOG=1 is sufficient for the probe.
 
- -- DenuoWeb <5424250+denuoweb@users.noreply.github.com>  Sat, 08 Aug 2026 09:46:00 -0700
+ -- Jaron Rosenau <jaron@rosenau.info>  Sat, 08 Aug 2026 09:46:00 -0700
 
 box86-16k (0.3.8+git20260807.0579f8b+16k10) unstable; urgency=medium
 
@@ -43,7 +43,7 @@ box86-16k (0.3.8+git20260807.0579f8b+16k10) unstable; urgency=medium
   * Extend the 16K ELF regression to verify that each bridge brick occupies one
     complete host page before exercising the ELF32 mapping path.
 
- -- DenuoWeb <5424250+denuoweb@users.noreply.github.com>  Sat, 08 Aug 2026 01:31:00 -0700
+ -- Jaron Rosenau <jaron@rosenau.info>  Sat, 08 Aug 2026 01:31:00 -0700
 
 box86-16k (0.3.8+git20260807.0579f8b+16k8) unstable; urgency=medium
 
@@ -59,7 +59,7 @@ box86-16k (0.3.8+git20260807.0579f8b+16k8) unstable; urgency=medium
   * Declare box86-16k as a Conflicts/Replaces successor to the legacy
     box86-steam16k package so upgrades can replace its binfmt file cleanly.
   * Install Box86's upstream /etc/box86.box86rc database explicitly so Steam gets
-    its intended BOX86_NOGTK, strong-memory, callret, and emulated-library profile.
+    its intended BOX86_NOGTK, strongmem, callret and emulated-library overrides).
   * Add the ARMHF16K native-library closure auditor and ship the observed Debian 13
     Pi 5 incompatible-library manifest with the runtime package.
   * Keep the validated zlib/libbsd/libXau/libXdmcp/libxcb ARMHF cross-build path.
@@ -71,4 +71,4 @@ box86-16k (0.3.8+git20260807.0579f8b+16k8) unstable; urgency=medium
     LD_LIBRARY_PATH/DRI/EGL/Vulkan environment to Box86 descendants only, keeping
     Steam's 64-bit bootstrap/supervisor environment clean.
 
- -- DenuoWeb <5424250+denuoweb@users.noreply.github.com>  Fri, 07 Aug 2026 20:55:00 -0700
+ -- Jaron Rosenau <jaron@rosenau.info>  Fri, 07 Aug 2026 20:55:00 -0700
