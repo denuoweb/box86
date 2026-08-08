@@ -20,5 +20,10 @@ PREFIX=/usr/lib/box86-16k/native16k
 [[ -d "$PREFIX" ]] || { echo "Runtime package installed but $PREFIX is missing" >&2; exit 3; }
 python3 "$ROOT/scripts/armhf16k-verify-tree.py" --page-size 16384 "$PREFIX"
 
-echo "Installed private ARMHF16K runtime: $DEB"
+# This is the decisive host-side check before Steam: compile a 16K-linked
+# ARMHF dlopen harness and force the actual 16K kernel/glibc loader to resolve
+# GLVND, Mesa, Gallium/V3D, XCB and zlib from the private closure.
+bash "$ROOT/scripts/armhf16k-test-private-native.sh"
+
+echo "Installed and host-validated private ARMHF16K runtime: $DEB"
 echo "steam16k will prefer $PREFIX when the +16k7 launcher is installed."
