@@ -50,7 +50,15 @@ The builder is intended to run on Debian 13 arm64 with ARMHF enabled:
 bash scripts/armhf16k-bootstrap-debian13.sh
 ```
 
-Debian source repositories (`deb-src`) must be enabled. The bootstrap checks this and stops rather than silently building from unrelated sources.
+The bootstrap enables matching Debian source repositories when necessary, installs `sbuild` and its unshare backend prerequisites, and creates a reusable clean arm64 build root under:
+
+```text
+~/.cache/sbuild/trixie-arm64.tar.gz
+```
+
+Build dependencies are **not** installed into the normal host package database. Each source is cross-built in an ephemeral sbuild environment with build architecture `arm64` and host architecture `armhf`. This avoids Multi-Arch development-package collisions on the Raspberry Pi host.
+
+The unshare backend requires unprivileged user namespaces. The bootstrap checks this before declaring the environment ready.
 
 ## Audit the installed ARMHF closure
 
@@ -72,7 +80,16 @@ The default roots are GL, GLX, Mesa GLX, EGL, Mesa EGL, GLdispatch, and GBM. Dep
 bash scripts/armhf16k-build-all.sh
 ```
 
-Each source package is downloaded from the configured Debian source repositories, cross-build dependencies are resolved for `armhf`, a local `+16k1` Debian revision is created, and the source is cross-built with the 16K linker policy.
+For each stage the rebuilder:
+
+1. downloads the configured Debian source package on the host;
+2. applies any source-specific ARMHF16K hook;
+3. creates a local `+16k1` source revision with the 16K linker policy persisted in `debian/rules`;
+4. invokes `sbuild --build=arm64 --host=armhf` in the clean unshare root;
+5. exposes previously built packages from `armhf16k/repo/pool/` to sbuild through its transient extra-package archive;
+6. validates every ARM ELF in every generated `.deb` before publishing it.
+
+This keeps source-build dependencies isolated while still allowing later stages such as LLVM and GLVND to build against earlier ARMHF16K packages.
 
 The source build is validated before its `.deb` files are copied into:
 
