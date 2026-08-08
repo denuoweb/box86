@@ -77,6 +77,7 @@ $SUDO apt-get install -y --no-install-recommends \
     dpkg-dev \
     fakeroot \
     equivs \
+    quilt \
     python3 \
     python3-mako \
     python3-yaml \
@@ -101,7 +102,7 @@ fi
 for x in \
     arm-linux-gnueabihf-gcc arm-linux-gnueabihf-g++ \
     arm-linux-gnueabihf-ar arm-linux-gnueabihf-strip \
-    meson ninja pkg-config; do
+    meson ninja pkg-config quilt; do
     command -v "$x" >/dev/null 2>&1 || { echo "Missing build tool: $x" >&2; exit 4; }
 done
 
