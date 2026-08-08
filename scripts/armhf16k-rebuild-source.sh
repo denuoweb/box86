@@ -25,7 +25,10 @@ if ! dpkg --print-foreign-architectures | grep -qx "$HOST_ARCH" && [[ "$(dpkg --
     exit 3
 fi
 
-HOST_GNU_TYPE=$(dpkg-architecture -a"$HOST_ARCH" -qDEB_HOST_GNU_TYPE)
+# dpkg-architecture warns when probing a foreign host architecture while the
+# caller's current CC still names the build architecture. We are only asking
+# it for the canonical tuple here and set the cross CC explicitly below.
+HOST_GNU_TYPE=$(dpkg-architecture -a"$HOST_ARCH" -qDEB_HOST_GNU_TYPE 2>/dev/null)
 BUILD_GNU_TYPE=$(dpkg-architecture -qDEB_BUILD_GNU_TYPE)
 
 for x in \
