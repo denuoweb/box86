@@ -76,16 +76,11 @@ def armhf_ldconfig() -> dict[str, list[str]]:
     return result
 
 
-def armhf_file_index() -> dict[str, list[str]]:
-    """Index SONAME-like files below the ARMHF multiarch roots.
-
-    Some libraries used through DT_RUNPATH/RPATH are intentionally kept in
-    package-private subdirectories and are therefore absent from ldconfig -p.
-    PulseAudio's pulseaudio/libpulsecommon-*.so is a concrete example.
-    """
+def file_index(roots: Iterable[str]) -> dict[str, list[str]]:
+    """Index SONAME-like files recursively below one or more library roots."""
     result: dict[str, list[str]] = {}
     seen_real_dirs: set[str] = set()
-    for root in DEFAULT_ARMHF_DIRS:
+    for root in roots:
         if not os.path.isdir(root):
             continue
         real_root = os.path.realpath(root)
@@ -103,9 +98,18 @@ def armhf_file_index() -> dict[str, list[str]]:
 def resolve_soname(
     soname: str,
     cache: dict[str, list[str]],
-    file_index: dict[str, list[str]],
+    system_index: dict[str, list[str]],
+    overlays: list[str],
+    overlay_index: dict[str, list[str]],
 ) -> str | None:
-    """Resolve ARMHF SONAMEs from ldconfig and multiarch/private directories."""
+    """Resolve like LD_LIBRARY_PATH: private overlays first, then system ARMHF."""
+    for root in overlays:
+        path = os.path.join(root, soname)
+        if os.path.exists(path):
+            return path
+    for path in overlay_index.get(soname, []):
+        if os.path.exists(path):
+            return path
     for path in cache.get(soname, []):
         if os.path.exists(path):
             return path
@@ -113,7 +117,7 @@ def resolve_soname(
         path = os.path.join(directory, soname)
         if os.path.exists(path):
             return path
-    for path in file_index.get(soname, []):
+    for path in system_index.get(soname, []):
         if os.path.exists(path):
             return path
     return None
@@ -213,9 +217,13 @@ def record_for(soname: str, path: str | None, page_size: int) -> AuditRecord:
     )
 
 
-def walk_closure(roots: Iterable[str], page_size: int) -> list[AuditRecord]:
+def walk_closure(
+    roots: Iterable[str], page_size: int, overlays: Iterable[str] = ()
+) -> list[AuditRecord]:
     cache = armhf_ldconfig()
-    file_index = armhf_file_index()
+    system_index = file_index(DEFAULT_ARMHF_DIRS)
+    overlay_roots = [os.path.abspath(p) for p in overlays if os.path.isdir(p)]
+    overlay_index = file_index(overlay_roots)
     seen: set[str] = set()
     ordered: list[AuditRecord] = []
 
@@ -223,7 +231,11 @@ def walk_closure(roots: Iterable[str], page_size: int) -> list[AuditRecord]:
         if soname in seen:
             return
         seen.add(soname)
-        rec = record_for(soname, resolve_soname(soname, cache, file_index), page_size)
+        rec = record_for(
+            soname,
+            resolve_soname(soname, cache, system_index, overlay_roots, overlay_index),
+            page_size,
+        )
         ordered.append(rec)
         for dep in rec.needed:
             visit(dep)
@@ -236,7 +248,6 @@ def walk_closure(roots: Iterable[str], page_size: int) -> list[AuditRecord]:
 def print_human(records: list[AuditRecord], *, bad_only: bool) -> None:
     for rec in records:
         # "bad" includes incompatible, missing, and unresolved/unknown entries.
-        # A missing node is actionable and must not disappear behind --bad-only.
         if bad_only and rec.compatible is True:
             continue
         if rec.path is None:
@@ -267,12 +278,13 @@ def main() -> int:
     parser.add_argument("roots", nargs="*", help="ARMHF SONAME roots; defaults to the GL/EGL closure")
     parser.add_argument("--page-size", type=int, default=DEFAULT_PAGE_SIZE)
     parser.add_argument("--bad-only", action="store_true")
+    parser.add_argument("--overlay", action="append", default=[], help="library root searched before system ARMHF paths; repeatable")
     parser.add_argument("--json", action="store_true", dest="as_json")
     parser.add_argument("--fail-on-bad", action="store_true")
     args = parser.parse_args()
 
     roots = args.roots or DEFAULT_ROOTS
-    records = walk_closure(roots, args.page_size)
+    records = walk_closure(roots, args.page_size, args.overlay)
 
     if args.as_json:
         print(json.dumps([asdict(r) for r in records], indent=2))
