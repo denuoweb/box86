@@ -74,9 +74,9 @@ export DEBEMAIL=${DEBEMAIL:-5424250+denuoweb@users.noreply.github.com}
         *) export DEB_BUILD_OPTIONS="${DEB_BUILD_OPTIONS:+$DEB_BUILD_OPTIONS }nocheck" ;;
     esac
 
-    echo "Building $SOURCE for $HOST_ARCH"
+    echo "Building architecture-dependent $SOURCE binaries for $HOST_ARCH"
     echo "LDFLAGS=$LDFLAGS"
-    dpkg-buildpackage -b -us -uc -a"$HOST_ARCH"
+    dpkg-buildpackage -B -us -uc -a"$HOST_ARCH"
 )
 
 mapfile -t DEBS < <(find "$WORK" -maxdepth 1 -type f -name '*.deb' ! -name '*-dbgsym_*' -print | sort)
