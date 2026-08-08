@@ -1,0 +1,140 @@
+From: box86-16k contributors
+Subject: [PATCH 7/7] X11: bridge thread function-pointer globals
+
+Native XInitThreads populates exported libX11 data symbols such as
+_XLockMutex_fn with native ARM function pointers. Box86 currently exposes
+those symbols directly with DATAB, so emulated i386 X11 extensions can read a
+native Thumb pointer and jump to it as if it were x86 code.
+
+Give the x86 side shadow DATAM variables instead. After native XInitThreads,
+read each native callback slot, create an x86 bridge for the native function,
+and publish the bridge address through the shadow variable. Refresh the
+shadows both for guest XInitThreads calls and for BOX86_X11THREADS startup.
+---
+ src/wrapped/wrappedlibx11.c         | 48 +++++++++++++++++++++++++++++++++++++-
+ src/wrapped/wrappedlibx11_private.h | 16 ++++++-------
+ 2 files changed, 56 insertions(+), 8 deletions(-)
+
+diff --git a/src/wrapped/wrappedlibx11.c b/src/wrapped/wrappedlibx11.c
+--- a/src/wrapped/wrappedlibx11.c
++++ b/src/wrapped/wrappedlibx11.c
+@@ -89,5 +89,42 @@ typedef uintptr_t (*LFpii_t)(void*, int32_t, int32_t);
+ typedef int32_t (*iFpiiL_t)(void*, int32_t, int32_t, uintptr_t);
+ typedef void* (*pFpiiuu_t)(void*, int32_t, int32_t, uint32_t, uint32_t);
+ 
++EXPORT uintptr_t my__XCreateMutex_fn = 0;
++EXPORT uintptr_t my__XFreeMutex_fn = 0;
++EXPORT uintptr_t my__XLockMutex_fn = 0;
++EXPORT uintptr_t my__XUnlockMutex_fn = 0;
++EXPORT uintptr_t my__XInitDisplayLock_fn = 0;
++EXPORT uintptr_t my__XFreeDisplayLock_fn = 0;
++EXPORT uintptr_t my__Xthread_self_fn = 0;
++
++static uintptr_t bridgeX11ThreadDataFunction(library_t* lib, const char* name, wrapper_t w)
++{
++    void* slot = dlsym(lib->w.lib, name);
++    if(!slot)
++        return 0;
++    void* fnc = *(void**)slot;
++    if(!fnc)
++        return 0;
++    return AddCheckBridge(lib->w.bridge, w, fnc, 0, name);
++}
++
++static void refreshX11ThreadDataBridges(library_t* lib)
++{
++    my__XCreateMutex_fn = bridgeX11ThreadDataFunction(lib, "_XCreateMutex_fn", vFp);
++    my__XFreeMutex_fn = bridgeX11ThreadDataFunction(lib, "_XFreeMutex_fn", vFp);
++    my__XLockMutex_fn = bridgeX11ThreadDataFunction(lib, "_XLockMutex_fn", vFp);
++    my__XUnlockMutex_fn = bridgeX11ThreadDataFunction(lib, "_XUnlockMutex_fn", vFp);
++    my__XInitDisplayLock_fn = bridgeX11ThreadDataFunction(lib, "_XInitDisplayLock_fn", iFp);
++    my__XFreeDisplayLock_fn = bridgeX11ThreadDataFunction(lib, "_XFreeDisplayLock_fn", vFp);
++    my__Xthread_self_fn = bridgeX11ThreadDataFunction(lib, "_Xthread_self_fn", uFv);
++
++    if(my__XLockMutex_fn) {
++        printf_log(LOG_NONE,
++            "WATCH_X11_THREAD_BRIDGES lock=%p unlock=%p init_display=%p thread_self=%p\n",
++            (void*)my__XLockMutex_fn, (void*)my__XUnlockMutex_fn,
++            (void*)my__XInitDisplayLock_fn, (void*)my__Xthread_self_fn);
++    }
++}
++
+ #define ADDED_FUNCTIONS()   \
+     GO(XInitThreads, uFv_t) \
+@@ -96,4 +133,13 @@ typedef void* (*pFpiiuu_t)(void*, int32_t, int32_t, uint32_t, uint32_t);
+ 
+ #include "wrappercallback.h"
+ 
++EXPORT int my_XInitThreads(x86emu_t* emu)
++{
++    (void)emu;
++    int ret = my->XInitThreads();
++    if(ret)
++        refreshX11ThreadDataBridges(my_lib);
++    return ret;
++}
++
+ #define SUPER() \
+@@ -1604,10 +1650,12 @@ EXPORT void my_XFreeEventData(x86emu_t* emu, void* dpy, my_XGenericEventCookie_
+     #define CUSTOM_INIT                 \
+         getMy(lib);                     \
+         setNeededLibs(lib, 1, "libdl.so"); \
+-        if(box86_x11threads) my->XInitThreads();
++        if(box86_x11threads) my->XInitThreads(); \
++        refreshX11ThreadDataBridges(lib);
+ #else
+     #define CUSTOM_INIT                 \
+         getMy(lib);                     \
+         setNeededLibs(lib, 1, "libdl.so.2"); \
+-        if(box86_x11threads) my->XInitThreads();
++        if(box86_x11threads) my->XInitThreads(); \
++        refreshX11ThreadDataBridges(lib);
+ #endif
+ 
+diff --git a/src/wrapped/wrappedlibx11_private.h b/src/wrapped/wrappedlibx11_private.h
+--- a/src/wrapped/wrappedlibx11_private.h
++++ b/src/wrapped/wrappedlibx11_private.h
+@@ -233,4 +233,4 @@ GOM(XCreateImage, pFEppuiipuuii)
+ GO(dummy_XCreateImage, pFppuiipuuii)    // to have the wrapper
+-DATAB(_XCreateMutex_fn, 4)
++DATAM(_XCreateMutex_fn, 4)
+ //GO(XCreateOC
+@@ -361,3 +361,3 @@ GO(XFreeColors, iFpppiu)
+ GO(XFreeCursor, iFpp)
+-DATAB(_XFreeDisplayLock_fn, 4)
++DATAM(_XFreeDisplayLock_fn, 4)
+ // _XFreeDisplayStructure
+@@ -374,3 +374,3 @@ GO(XFreeGC, iFpp)
+ GO(XFreeModifiermap, iFp)
+-DATAB(_XFreeMutex_fn, 4)
++DATAM(_XFreeMutex_fn, 4)
+ GO(XFreePixmap, iFpp)
+@@ -483,3 +483,3 @@ DATA(_XimXTransSocketUNIXFuncs, 4)
+ // _XInitDefaultOM
+-DATAB(_XInitDisplayLock_fn, 4)
++DATAM(_XInitDisplayLock_fn, 4)
+ // _XInitDynamicIM
+@@ -489,4 +489,4 @@ GOM(XInitImage, iFEp)
+ // _XInitImageFuncPtrs
+ // _XInitKeysymDB
+-GO(XInitThreads, uFv)
++GOM(XInitThreads, iFEv)
+ //GO(XInsertModifiermapEntry
+@@ -773,4 +773,4 @@ GO(XLocaleOfIM, pFu)
+ //GO(XLocaleOfOM
+ GO(XLockDisplay, vFp)
+-DATAB(_XLockMutex_fn, 4)
++DATAM(_XLockMutex_fn, 4)
+ GO(XLookupColor, iFppppp)
+@@ -1026,4 +1026,4 @@ GO(XTextWidth, iFppi)
+ GO(XTextWidth16, iFppi)
+-DATAB(_Xthread_self_fn, 4)
++DATAM(_Xthread_self_fn, 4)
+ GO(XTranslateCoordinates, iFpppiippp)
+@@ -1046,4 +1046,4 @@ GO(XUnloadFont, iFpp)
+ GO(XUnlockDisplay, vFp)
+-DATAB(_XUnlockMutex_fn, 4)
++DATAM(_XUnlockMutex_fn, 4)
+ GO(XUnmapSubwindows, iFpp)
+-- 
+2.39.5
