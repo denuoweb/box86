@@ -35,7 +35,7 @@ diff --git a/src/emu/x86int3.c b/src/emu/x86int3.c
  #include "x86primop.h"
  #include "x86trace.h"
  #include "wrapper.h"
-+#include "bridge_private.h"
++#include "tools/bridge_private.h"
  #include "box86context.h"
  #include "librarian.h"
 @@ -62,6 +63,9 @@ x86emu_t* x86emu_fork(x86emu_t* emu, int forktype)
