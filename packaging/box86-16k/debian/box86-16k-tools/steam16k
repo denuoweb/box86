@@ -34,6 +34,10 @@ if [ -d "$NATIVE16K" ]; then
     export BOX86_LIBGL=${BOX86_LIBGL:-$NATIVE16K/libGL.so.1}
 fi
 
+# Proton's Xalia path currently fails to discover a usable display in this
+# environment. Keep the working X11 path unless the caller explicitly opts in.
+export PROTON_USE_XALIA=${PROTON_USE_XALIA:-0}
+
 # Preserve BOX86_NORCFILES and BOX86_EMULATED_LIBS supplied by the caller.
 export STEAM_RUNTIME=${STEAM_RUNTIME:-1}
 export STEAMOS=${STEAMOS:-1}
