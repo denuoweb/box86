@@ -1,148 +1,140 @@
 # ARMHF 16K native-library runtime
 
-Box86 can now load 4K-aligned i386 guest ELF files on a 16K-page Raspberry Pi 5 kernel, but Box86 also wraps selected native ARMHF libraries. Those native libraries are loaded by the host dynamic loader, so an ARMHF DSO whose PT_LOAD layout is only compatible with 4K pages can still fail with:
+Box86's guest-side loader can execute ordinary 4K-oriented i386 ELFs on a 16K-page Raspberry Pi 5 kernel, but Box86 also wraps selected native ARMHF libraries. Those libraries are mapped by the host dynamic loader and therefore need their own 16K-compatible PT_LOAD layout.
 
-```text
-ELF load command address/offset not page-aligned
-```
-
-This directory contains the second half of the 16K effort: a reproducible Debian ARMHF package rebuilder and local APT repository for native libraries that are not 16K-loadable.
-
-## Invariant
-
-For each ARM ELF PT_LOAD segment, the runtime auditor requires:
+The runtime invariant is:
 
 ```text
 (p_vaddr - p_offset) % 16384 == 0
 ```
 
-The rebuilder adds this linker policy to Debian package builds:
+ARMHF16K links rebuilt objects with:
 
 ```text
 -Wl,-z,max-page-size=0x4000
 ```
 
-It then extracts every generated `.deb` and refuses to publish the source build if any shipped ARM ELF violates the 16K mapping invariant.
+## Pi 5 strategy
 
-## Debian 13 / Pi 5 baseline
+The original recursive Steam/GL audit found 15 incompatible ARMHF DSOs. Four low-level source packages were rebuilt and validated directly on the Pi:
 
-The first recursive GL/EGL audit found 15 incompatible ARMHF DSOs. They collapse to seven Debian source packages:
+- `zlib`
+- `libbsd`
+- `libxau`
+- `libxcb` (all of its runtime extension libraries passed the verifier)
 
-| Stage | Source package | Observed incompatible binary packages |
-|---:|---|---|
-| 10 | `zlib` | `zlib1g` |
-| 20 | `libbsd` | `libbsd0` |
-| 30 | `libxau` | `libxau6` |
-| 40 | `libxcb` | `libxcb1`, `libxcb-randr0`, `libxcb-sync1`, `libxcb-present0`, `libxcb-xfixes0`, `libxcb-dri3-0`, `libxcb-shm0` |
-| 50 | `elfutils` | `libelf1t64` |
-| 60 | `llvm-toolchain-19` | `libllvm19` |
-| 70 | `libglvnd` | `libgl1`, `libglx0`, `libegl1` |
+The generic Raspberry Pi Mesa package was already 16K-aligned, but its broad Gallium build depended on `libLLVM.so.19.1`, which in turn pulled `libelf.so.1` and other generic-driver dependencies. ARMHF16K does not rebuild that generic closure.
 
-The full observed SONAME list is in `baseline-debian13-pi5.tsv`. The source manifest is `manifest.tsv`.
+Instead, the graphics runtime is intentionally Pi 5-specific:
 
-Several important ARMHF components were already 16K-compatible and are intentionally not rebuilt, including glibc, `libX11.so.6`, `libGLdispatch.so.0`, Mesa's `libGLX_mesa.so.0` and `libEGL_mesa.so.0`, Gallium, DRM, and GBM.
+```text
+validated zlib/libbsd/libXau/libxcb
+                 |
+                 v
+Mesa: V3D Gallium + Broadcom V3DV only
+LLVM disabled; no libLLVM/libelf closure
+                 |
+                 v
+private 16K GLVND
+                 |
+                 v
+/usr/lib/box86-16k/native16k
+```
+
+The private runtime does not overwrite `/usr/lib/arm-linux-gnueabihf`. `steam16k` uses it only for Box86 when the package is installed.
 
 ## Bootstrap
-
-The builder targets Debian 13 arm64 on Raspberry Pi 5:
 
 ```bash
 bash scripts/armhf16k-bootstrap-debian13.sh
 ```
 
-A 16K arm64 kernel can execute AArch32 instructions, but stock Debian ARMHF bootstrap binaries can still contain 4K-only PT_LOAD layouts. That creates a bootstrap cycle: the ARMHF package set must be rebuilt for 16K before all of its own tools can be loaded directly by the host kernel.
+The supported path uses native arm64 build tools and the Debian ARMHF cross compiler. PRoot, sbuild, QEMU binfmt and an ARMHF chroot are not part of the current build path.
 
-ARMHF16K breaks that cycle entirely in userspace:
+## Stages
 
-1. `debootstrap --foreign --arch=armhf` downloads and extracts the base ARMHF filesystem without executing ARMHF programs;
-2. PRoot runs debootstrap's second stage with `-q qemu-arm`, so every guest execution is translated through QEMU rather than the host ELF loader;
-3. the completed base is cached at:
+`armhf16k/manifest.tsv` defines:
 
 ```text
-~/.cache/armhf16k/trixie-armhf-proot.tar.gz
+10  zlib
+20  libbsd
+30  libxau
+40  libxcb
+50  mesa-pi5-private
+60  libglvnd-private
+70  private-runtime
 ```
 
-PRoot provides a userspace chroot and binfmt layer. Kernel `binfmt_misc`, sbuild user namespaces, and host Multi-Arch build-dependency installation are not required by the current build path.
-
-QEMU is build-time scaffolding only. Produced packages are normal ARMHF binaries and must pass the direct 16K ELF verifier before they are published.
-
-## Audit the installed ARMHF closure
+Build one stage with:
 
 ```bash
-python3 scripts/armhf16k-audit.py --bad-only
+ONLY_SOURCE=mesa-pi5-private bash scripts/armhf16k-build-all.sh
 ```
 
-To make incompatibility a failing test:
+or continue through the private graphics stages:
 
 ```bash
-python3 scripts/armhf16k-audit.py --bad-only --fail-on-bad
+START_AT=mesa-pi5-private bash scripts/armhf16k-build-all.sh
 ```
 
-The default roots are GL, GLX, Mesa GLX, EGL, Mesa EGL, GLdispatch, and GBM. Dependencies are followed recursively through `DT_NEEDED` using ARMHF paths from `ldconfig`.
+The already validated low-level `.deb` files can remain in `armhf16k/repo/pool/`; the final runtime assembler extracts their libraries rather than installing them over Debian's system copies.
 
-## Rebuild the full incompatible source set
+## Raspberry Pi Mesa
 
-```bash
-bash scripts/armhf16k-build-all.sh
-```
+`scripts/armhf16k-build-mesa-pi5.sh`:
 
-For each stage the rebuilder:
+1. identifies the installed ARMHF Raspberry Pi Mesa candidate;
+2. fetches the matching Pi-specific `rpt` source from the Raspberry Pi archive;
+3. fetches Debian Trixie's `25.0.7-2+deb13u1` stable-security source and layers the CVE-2026-40393 backports onto the Pi tree;
+4. cross-builds Mesa with `gallium-drivers=v3d`, `vulkan-drivers=broadcom`, and LLVM disabled;
+5. installs into `armhf16k/private/mesa-root/`;
+6. verifies every ARM ELF for 16K PT_LOAD congruence;
+7. rejects the build if Gallium still has a `DT_NEEDED` entry for `libLLVM` or `libelf`.
 
-1. downloads the configured Debian source package on the host;
-2. applies any source-specific ARMHF16K hook;
-3. derives a local package version from the current ARMHF binary candidate and appends the ARMHF16K revision;
-4. persists the 16K linker policy in `debian/rules`;
-5. extracts a disposable copy of the cached ARMHF filesystem;
-6. runs `apt-get build-dep` and `dpkg-buildpackage -B` inside PRoot with `-q qemu-arm`;
-7. exposes the local `armhf16k/repo/` to the guest APT resolver so earlier rebuilt packages can satisfy dependencies;
-8. validates every ARM ELF in every generated `.deb` before publishing it.
+It fails closed if the Pi source or the Debian security source cannot be obtained.
 
-The local revision defaults to `16k2`. For Debian binary NMUs such as `...+b1`, the rebuilder bases the local version on that full binary candidate before appending `+16k2`, so APT considers the ARMHF16K package newer than the binary it replaces.
+## Private GLVND
 
-The source build is validated before its `.deb` files are copied into:
+`scripts/armhf16k-build-libglvnd-private.sh` cross-builds GLVND with the same 16K linker policy and stages it under `armhf16k/private/glvnd-root/`.
+
+## Assemble and install
+
+Stage 70 creates:
 
 ```text
-armhf16k/repo/pool/
+dist/box86-armhf16k-runtime_1.0+16k3_armhf.deb
 ```
 
-Useful controls:
+The package installs under:
 
-```bash
-ONLY_SOURCE=zlib bash scripts/armhf16k-build-all.sh
-START_AT=libxcb bash scripts/armhf16k-build-all.sh
-STOP_AFTER=elfutils bash scripts/armhf16k-build-all.sh
+```text
+/usr/lib/box86-16k/native16k/
 ```
 
-`llvm-toolchain-19` is intentionally late in the build because it is much larger than the other source packages and will be substantially slower under QEMU user-mode than the smaller stages.
+and contains the private GLVND/Mesa closure plus the previously validated low-level libraries.
 
-## Create and enable the local repository
-
-`armhf16k-build-all.sh` creates the repository index automatically after a complete run. It can also be regenerated directly:
-
-```bash
-bash scripts/armhf16k-make-repo.sh
-bash scripts/armhf16k-enable-repo.sh
-```
-
-The repository is a flat local APT repository marked trusted because it is generated locally from Debian source packages. It does not replace or modify upstream repository configuration.
-
-## Install the rebuilt runtime packages
+Install and validate it with:
 
 ```bash
 bash scripts/armhf16k-install-targets.sh
 ```
 
-The installer requests only the binary packages observed as incompatible. APT resolves same-source dependencies from the local repository when required. After installation, the recursive auditor runs again and fails if any GL/EGL closure library is still 16K-incompatible.
+Installation performs three checks before returning success:
 
-## Package updates
+1. every packaged ARM ELF satisfies the 16K mapping invariant;
+2. the installed private tree satisfies the same invariant and contains no `libLLVM`/`libelf` dependency in the Pi graphics closure;
+3. a freshly compiled 16K-linked ARMHF program directly `dlopen()`s GLVND, Mesa, Gallium/V3D, XCB and zlib through the real host kernel/glibc loader.
 
-Re-run the audit after ARMHF library upgrades. If a newer Debian binary/source becomes the candidate and is not 16K-compatible, rebuild that source again; the rebuilder derives its local revision from the current candidate so the rebuilt package follows the Debian update rather than permanently pinning an older base.
+Only after that passes should `steam16k` be used as the next integration test.
 
-## Scope
+## Box86 launcher integration
 
-This runtime layer fixes host-side ARMHF ELF layout. It is distinct from the Box86 guest-side patches under `patches/16k/`:
+Box86 package `+16k7` makes `steam16k` detect `/usr/lib/box86-16k/native16k` and, only when present, configure:
 
-1. Box86 guest ELF/mprotect support lets 4K-oriented i386 programs execute on a 16K host.
-2. ARMHF16K rebuilds native libraries that Box86 wraps so the host dynamic loader can map them on the same 16K kernel.
+- `LD_LIBRARY_PATH`
+- `BOX86_LIBGL`
+- `LIBGL_DRIVERS_PATH`
+- `__EGL_VENDOR_LIBRARY_DIRS`
+- private Vulkan ICD manifests
 
-Both layers are required for full native-wrapper workloads such as Steam on the Raspberry Pi 5 16K kernel.
+This leaves the normal Debian/Raspberry Pi graphics libraries unchanged for the rest of the system.
