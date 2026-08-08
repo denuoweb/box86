@@ -1,0 +1,345 @@
+From: box86-16k contributors
+Subject: [PATCH 4/4] LIBC: emulate 4K guest madvise on larger host pages
+
+The Box64 non-4K protection work in 9c11c567 also wrapped madvise(2),
+because an i386 guest may issue advice on a 4K-aligned range that is not
+aligned to the host's 16K page size.  The original Box86 16K port carried the
+mprotect half of that change but omitted madvise.
+
+Keep guest 4K alignment semantics, round non-destructive host advice to host
+pages, and emulate unaligned MADV_DONTNEED for writable anonymous guest mmap
+regions by zeroing only the requested guest pages.  Track file-backed guest
+mmap regions separately so the fallback never overwrites file-backed data.
+Also route the raw i386 madvise syscall through the same wrapper.
+---
+ src/custommem.c                 | 56 ++++++++++++++++++++++++++++
+ src/emu/x86syscall.c            | 11 ++++++
+ src/include/custommem.h         |  4 ++
+ src/wrapped/wrappedlibc.c       | 80 ++++++++++++++++++++++++++++++++++++++++
+ src/wrapped/wrappedlibc_private.h |  5 ++-
+ 5 files changed, 155 insertions(+), 1 deletion(-)
+
+diff --git a/src/include/custommem.h b/src/include/custommem.h
+index bc66143..16c0004 100644
+--- a/src/include/custommem.h
++++ b/src/include/custommem.h
+@@ -51,10 +51,14 @@ void updateProtection(uintptr_t addr, size_t size, uint32_t prot);
+ void setProtection(uintptr_t addr, size_t size, uint32_t prot);
+ void setProtection_mmap(uintptr_t addr, size_t size, uint32_t prot);
+ void setProtection_elf(uintptr_t addr, size_t size, uint32_t prot);
++void setFileMapped(uintptr_t addr, size_t size);
++void clearFileMapped(uintptr_t addr, size_t size);
+ void freeProtection(uintptr_t addr, size_t size);
+ void refreshProtection(uintptr_t addr);
+ uint32_t getProtection(uintptr_t addr);
+ int getMmapped(uintptr_t addr);
++int getFileMapped(uintptr_t addr);
++int memExist(uintptr_t addr);
+ void loadProtectionFromMap();
+ #ifdef DYNAREC
+ void protectDB(uintptr_t addr, size_t size);
+diff --git a/src/custommem.c b/src/custommem.c
+index a8cdfd1..16c0004 100644
+--- a/src/custommem.c
++++ b/src/custommem.c
+@@ -55,6 +55,7 @@ static int inited = 0;
+ 
+ static rbtree*  mapallmem = NULL;
+ static rbtree*  mmapmem = NULL;
++static rbtree*  mmapfilemem = NULL;
+ 
+ typedef struct blocklist_s {
+     void*               block;
+@@ -1045,11 +1046,52 @@ int getMmapped(uintptr_t addr)
+     return rb_get(mmapmem, addr);
+ }
+ 
++int memExist(uintptr_t addr)
++{
++    return rb_get(mapallmem, addr);
++}
++
++void setFileMapped(uintptr_t addr, size_t size)
++{
++    if(!size)
++        return;
++    addr &= ~(box86_pagesize-1);
++    size = ALIGN(size);
++    mutex_lock(&mutex_prot);
++    rb_set(mmapfilemem, addr, addr+size, 1);
++    mutex_unlock(&mutex_prot);
++}
++
++void clearFileMapped(uintptr_t addr, size_t size)
++{
++    if(!size)
++        return;
++    uintptr_t start = addr & ~(box86_pagesize-1);
++    uintptr_t end = ALIGN(addr + size);
++    if(end < start)
++        return;
++    mutex_lock(&mutex_prot);
++    rb_unset(mmapfilemem, start, end);
++    mutex_unlock(&mutex_prot);
++}
++
++int getFileMapped(uintptr_t addr)
++{
++    return rb_get(mmapfilemem, addr);
++}
++
+ 
+ #define LOWEST (void*)0x10000
+ #define MEDIAN (void*)0x40000000
+ static void* findBlockHinted(void* hint, size_t size, uintptr_t mask)
+@@ -1210,6 +1252,8 @@ void init_custommem_helper(box86context_t* ctx)
+     mapallmem = init_rbtree();
+     // init mmapmem list
+     mmapmem = init_rbtree();
++    // init file-backed guest mmap list
++    mmapfilemem = init_rbtree();
+     loadProtectionFromMap();
+ }
+ 
+@@ -1260,6 +1304,8 @@ void fini_custommem_helper(box86context_t *ctx)
+     memprot = NULL;
+     delete_rbtree(mmapmem);
+     mmapmem = NULL;
++    delete_rbtree(mmapfilemem);
++    mmapfilemem = NULL;
+     delete_rbtree(mapallmem);
+     mapallmem = NULL;
+ 
+diff --git a/src/wrapped/wrappedlibc_private.h b/src/wrapped/wrappedlibc_private.h
+index 86833cb..16c0004 100644
+--- a/src/wrapped/wrappedlibc_private.h
++++ b/src/wrapped/wrappedlibc_private.h
+@@ -1044,7 +1044,8 @@ GO(lsetxattr, iFpppui)
+ GO(lutimes, iFpp)
+ GOM(__lxstat, iFEipp)       //%%
+ GOM(__lxstat64, iFEipp)     //%%
+-GO(madvise, iFpLi)
++GOM(madvise, iFEpLi)
++GOM(__madvise, iFEpLi)
+ GOM(makecontext, iFEppiV)   //%%
+ // mallinfo
+ GOWS(mallinfo, pFEp)        //%%
+@@ -1305,7 +1306,9 @@ GO(popen, pFpp)
+ GO(posix_fadvise, iFiuui)
+ GO(posix_fadvise64, iFiuui)
+ GO(posix_fallocate, iFiii)
+ GO(posix_fallocate64, iFiII)
+-// posix_madvise
++GOM(posix_madvise, iFEpLi)
+ GOW(posix_memalign, iFpLL)
+ // posix_openpt // Weak
+ GO(posix_spawn, iFpppppp)
+diff --git a/src/emu/x86syscall.c b/src/emu/x86syscall.c
+index 5e33bf5..16c0004 100644
+--- a/src/emu/x86syscall.c
++++ b/src/emu/x86syscall.c
+@@ -66,6 +66,7 @@ void* my_mmap(x86emu_t* emu, void *addr, unsigned long length, int prot, int fla
+ void* my_mmap64(x86emu_t* emu, void *addr, unsigned long length, int prot, int flags, int fd, int64_t offset);
+ int my_munmap(x86emu_t* emu, void* addr, unsigned long length);
+ int my_mprotect(x86emu_t* emu, void *addr, unsigned long len, int prot);
++int my_madvise(x86emu_t* emu, void* addr, size_t length, int advice);
+ void* ElfSetBrk(void* newbrk);
+ int my_vfork(x86emu_t* emu);
+ 
+@@ -706,6 +707,11 @@ void EXPORT x86Syscall(x86emu_t *emu)
+             S_EAX = (intptr_t)my_mmap64(emu, (void*)R_EBX, (unsigned long)R_ECX, R_EDX, R_ESI, R_EDI, R_EBP);
+             break;
++        case 219:   // madvise
++            S_EAX = my_madvise(emu, (void*)R_EBX, (size_t)R_ECX, R_EDX);
++            if(S_EAX==-1 && errno>0)
++                S_EAX = -errno;
++            break;
+         case 195:   // stat64
+             {
+                 struct stat64 st;
+@@ -908,6 +914,8 @@ intptr_t my_syscall(x86emu_t* emu, int s, void* args)
+             return my_mprotect(emu, p(4), u32(8), i32(12));
+         case 174:   // sys_rt_sigaction
+             return my_syscall_sigaction(emu, i32(4), p(8), p(12), i32(16));
+         case 192:   // mmap2
+             return (intptr_t)my_mmap64(emu, p(4), u32(8), i32(12), i32(16), i32(20), u32(24));
++        case 219:   // madvise
++            return my_madvise(emu, p(4), u32(8), i32(12));
+         case 243: // set_thread_area
+             return my_set_thread_area((thread_area_t*)p(4));
+ #ifndef NOALIGN
+diff --git a/src/wrapped/wrappedlibc.c b/src/wrapped/wrappedlibc.c
+index fa6dc2e..16c0004 100644
+--- a/src/wrapped/wrappedlibc.c
++++ b/src/wrapped/wrappedlibc.c
+@@ -3161,8 +3161,12 @@ EXPORT void* my_mmap(x86emu_t* emu, void *addr, unsigned long length, int prot, i
+         }
+         if(emu)
+             setProtection_mmap((uintptr_t)ret, length, prot);
+-        else
++        else
+             setProtection((uintptr_t)ret, length, prot);
++        if(emu) {
++            clearFileMapped((uintptr_t)ret, length);
++            if(fd>=0 && !(flags&MAP_ANONYMOUS))
++                setFileMapped((uintptr_t)ret, length);
++        }
+     }
+     return ret;
+ }
+@@ -3222,8 +3226,12 @@ EXPORT void* my_mmap64(x86emu_t* emu, void *addr, unsigned long length, int prot,
+         }
+         if(emu)
+             setProtection_mmap((uintptr_t)ret, length, prot);
+-        else
++        else
+             setProtection((uintptr_t)ret, length, prot);
++        if(emu) {
++            clearFileMapped((uintptr_t)ret, length);
++            if(fd>=0 && !(flags&MAP_ANONYMOUS))
++                setFileMapped((uintptr_t)ret, length);
++        }
+     }
+     return ret;
+ }
+@@ -3237,6 +3245,7 @@ EXPORT void* my_mremap(x86emu_t* emu, void* old_addr, size_t old_size, size_t ne
+     if(ret==MAP_FAILED)
+         return ret; // failed...
+     uint32_t prot = getProtection((uintptr_t)old_addr)&~PROT_CUSTOM;
++    int file_mapped = getFileMapped((uintptr_t)old_addr);
+     if(ret==old_addr) {
+         if(old_size && old_size<new_size) {
+             setProtection_mmap((uintptr_t)ret+old_size, new_size-old_size, prot);
++            clearFileMapped((uintptr_t)ret+old_size, new_size-old_size);
++            if(file_mapped)
++                setFileMapped((uintptr_t)ret+old_size, new_size-old_size);
+             #ifdef DYNAREC
+             if(box86_dynarec)
+                 addDBFromAddressRange((uintptr_t)ret+old_size, new_size-old_size);
+@@ -3244,6 +3253,7 @@ EXPORT void* my_mremap(x86emu_t* emu, void* old_addr, size_t old_size, size_t ne
+             #endif
+         } else if(old_size && new_size<old_size) {
+             freeProtection((uintptr_t)ret+new_size, old_size-new_size);
++            clearFileMapped((uintptr_t)ret+new_size, old_size-new_size);
+             #ifdef DYNAREC
+             if(box86_dynarec)
+                 cleanDBFromAddressRange((uintptr_t)ret+new_size, old_size-new_size, 1);
+@@ -3251,6 +3261,9 @@ EXPORT void* my_mremap(x86emu_t* emu, void* old_addr, size_t old_size, size_t ne
+             #endif
+         } else if(!old_size) {
+             setProtection_mmap((uintptr_t)ret, new_size, prot);
++            clearFileMapped((uintptr_t)ret, new_size);
++            if(file_mapped)
++                setFileMapped((uintptr_t)ret, new_size);
+             #ifdef DYNAREC
+             if(box86_dynarec)
+                 addDBFromAddressRange((uintptr_t)ret, new_size);
+@@ -3263,6 +3276,7 @@ EXPORT void* my_mremap(x86emu_t* emu, void* old_addr, size_t old_size, size_t ne
+         #endif
+         ) {
+             freeProtection((uintptr_t)old_addr, old_size);
++            clearFileMapped((uintptr_t)old_addr, old_size);
+             #ifdef DYNAREC
+             if(box86_dynarec)
+                 cleanDBFromAddressRange((uintptr_t)old_addr, old_size, 1);
+@@ -3270,6 +3284,9 @@ EXPORT void* my_mremap(x86emu_t* emu, void* old_addr, size_t old_size, size_t ne
+             #endif
+         }
+         setProtection_mmap((uintptr_t)ret, new_size, prot); // should copy the protection from old block
++        clearFileMapped((uintptr_t)ret, new_size);
++        if(file_mapped)
++            setFileMapped((uintptr_t)ret, new_size);
+         #ifdef DYNAREC
+         if(box86_dynarec)
+             addDBFromAddressRange((uintptr_t)ret, new_size);
+@@ -3286,8 +3303,10 @@ EXPORT int my_munmap(x86emu_t* emu, void* addr, unsigned long length)
+     #endif
+     int ret = munmap(addr, length);
+-    if(!ret && length)
++    if(!ret && length) {
+         freeProtection((uintptr_t)addr, length);
++        clearFileMapped((uintptr_t)addr, length);
++    }
+     return ret;
+ }
+ 
+@@ -3383,6 +3402,67 @@ EXPORT int my_mprotect(x86emu_t* emu, void *addr, unsigned long len, int prot)
+ 
+     return box86_host_mprotect(host_start, host_end - host_start, prot);
+ }
++
++EXPORT int my_madvise(x86emu_t* emu, void* addr, size_t length, int advice)
++{
++    (void)emu;
++    uintptr_t start = (uintptr_t)addr;
++
++    /* Linux/i386 validates alignment against the guest's 4K page size. */
++    if(start & (BOX86_X86_PAGE_SIZE - 1)) {
++        errno = EINVAL;
++        return -1;
++    }
++    if(!length)
++        return 0;
++
++    uintptr_t end = start + length;
++    if(end < start) {
++        errno = ENOMEM;
++        return -1;
++    }
++    end = (end + BOX86_X86_PAGE_SIZE - 1) & ~(BOX86_X86_PAGE_SIZE - 1);
++    if(end < start) {
++        errno = ENOMEM;
++        return -1;
++    }
++
++    if(box86_pagesize == BOX86_X86_PAGE_SIZE)
++        return madvise((void*)start, end-start, advice);
++
++    uintptr_t host_start = start & ~(box86_pagesize - 1);
++    uintptr_t host_end = (end + box86_pagesize - 1) & ~(box86_pagesize - 1);
++    if(host_end < end) {
++        errno = ENOMEM;
++        return -1;
++    }
++
++    /* Non-discard advice can safely use the containing host pages. */
++    if(advice != MADV_DONTNEED)
++        return madvise((void*)host_start, host_end-host_start, advice);
++
++    /* A host-aligned discard can use the real syscall directly. */
++    if(start == host_start && end == host_end)
++        return madvise((void*)start, end-start, advice);
++
++    /*
++     * MADV_DONTNEED is destructive.  On a partial host page, discarding the
++     * whole host page would also discard neighbouring 4K guest pages.  Match
++     * Box64's non-4K fallback by zeroing only anonymous writable mmap pages.
++     * File-backed and non-mmap regions are left unchanged rather than
++     * corrupting data outside the guest request.
++     */
++    for(uintptr_t p = start; p < end; p += BOX86_X86_PAGE_SIZE) {
++        if(!memExist(p)) {
++            errno = ENOMEM;
++            return -1;
++        }
++        if(!getMmapped(p) || getFileMapped(p))
++            return 0;
++        if(!(getProtection(p) & PROT_WRITE))
++            return 0;
++    }
++    memset((void*)start, 0, end-start);
++    return 0;
++}
++
++EXPORT int my___madvise(x86emu_t* emu, void* addr, size_t length, int advice) __attribute__((alias("my_madvise")));
++
++EXPORT int my_posix_madvise(x86emu_t* emu, void* addr, size_t length, int advice)
++{
++    (void)emu;
++    if(advice == POSIX_MADV_DONTNEED)
++        return 0;
++    return posix_madvise(addr, length, advice);
++}
+ 
+ #ifndef ANDROID
+ typedef struct my_cookie_s {
