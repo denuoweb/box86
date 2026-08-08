@@ -22,6 +22,10 @@ DEFAULT_ROOTS = [
     "libEGL_mesa.so.0",
     "libgbm.so.1",
 ]
+DEFAULT_ARMHF_DIRS = [
+    "/usr/lib/arm-linux-gnueabihf",
+    "/lib/arm-linux-gnueabihf",
+]
 
 ELFCLASS32 = 1
 ELFDATA2LSB = 1
@@ -70,6 +74,18 @@ def armhf_ldconfig() -> dict[str, list[str]]:
             continue
         result.setdefault(soname, []).append(path)
     return result
+
+
+def resolve_soname(soname: str, cache: dict[str, list[str]]) -> str | None:
+    """Resolve an ARMHF SONAME using ldconfig, then the loader's multiarch dirs."""
+    for path in cache.get(soname, []):
+        if os.path.exists(path):
+            return path
+    for directory in DEFAULT_ARMHF_DIRS:
+        path = os.path.join(directory, soname)
+        if os.path.exists(path):
+            return path
+    return None
 
 
 def package_for(path: str) -> str | None:
@@ -151,7 +167,7 @@ def audit_elf(path: str, page_size: int) -> tuple[bool | None, list[LoadSegment]
 
 def record_for(soname: str, path: str | None, page_size: int) -> AuditRecord:
     if path is None:
-        return AuditRecord(soname, None, None, None, None, [], [], "no ARMHF ldconfig entry")
+        return AuditRecord(soname, None, None, None, None, [], [], "no ARMHF loader path found")
     real = os.path.realpath(path)
     is_arm, loads, compatible, error = audit_elf(real, page_size)
     return AuditRecord(
@@ -175,8 +191,7 @@ def walk_closure(roots: Iterable[str], page_size: int) -> list[AuditRecord]:
         if soname in seen:
             return
         seen.add(soname)
-        paths = cache.get(soname, [])
-        rec = record_for(soname, paths[0] if paths else None, page_size)
+        rec = record_for(soname, resolve_soname(soname, cache), page_size)
         ordered.append(rec)
         for dep in rec.needed:
             visit(dep)
@@ -188,7 +203,9 @@ def walk_closure(roots: Iterable[str], page_size: int) -> list[AuditRecord]:
 
 def print_human(records: list[AuditRecord], *, bad_only: bool) -> None:
     for rec in records:
-        if bad_only and rec.compatible is not False:
+        # "bad" includes incompatible, missing, and unresolved/unknown entries.
+        # A missing node is actionable and must not disappear behind --bad-only.
+        if bad_only and rec.compatible is True:
             continue
         if rec.path is None:
             status = "MISSING"
