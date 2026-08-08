@@ -9,13 +9,48 @@ from pathlib import Path
 import sys
 
 rules = Path(sys.argv[1])
-text = rules.read_text()
-old = 'cd contrib/minizip && autoreconf -fis && CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" uname=GNU ./configure --prefix=/usr --libdir=$${prefix}/lib/$(DEB_HOST_MULTIARCH)'
-new = 'cd contrib/minizip && autoreconf -fis && CC="$(DEB_HOST_GNU_TYPE)-gcc" AR="$(AR)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" uname=GNU ./configure --build=$(DEB_BUILD_GNU_TYPE) --host=$(DEB_HOST_GNU_TYPE) --prefix=/usr --libdir=$${prefix}/lib/$(DEB_HOST_MULTIARCH)'
+lines = rules.read_text().splitlines(keepends=True)
+matched = 0
+changed = 0
+out = []
 
-if old not in text:
-    raise SystemExit('zlib hook: expected contrib/minizip configure line not found')
+for line in lines:
+    if "cd contrib/minizip" in line and "./configure" in line:
+        matched += 1
+        new = line
 
-rules.write_text(text.replace(old, new, 1))
-print('ARMHF16K zlib hook: forced contrib/minizip ARMHF cross configuration')
+        # Debian's main zlib configure explicitly selects the target compiler,
+        # but the minizip subproject historically omitted it. Preserve the
+        # package's existing flags/path quoting and add only cross-build data.
+        if 'CC="$(DEB_HOST_GNU_TYPE)-gcc"' not in new:
+            marker = 'CFLAGS="$(CFLAGS)"'
+            if marker not in new:
+                raise SystemExit("zlib hook: minizip configure line lacks expected CFLAGS assignment")
+            new = new.replace(
+                marker,
+                'CC="$(DEB_HOST_GNU_TYPE)-gcc" AR="$(AR)" ' + marker,
+                1,
+            )
+
+        if '--host=$(DEB_HOST_GNU_TYPE)' not in new:
+            marker = './configure '
+            if marker not in new:
+                raise SystemExit("zlib hook: minizip configure invocation not recognized")
+            new = new.replace(
+                marker,
+                './configure --build=$(DEB_BUILD_GNU_TYPE) --host=$(DEB_HOST_GNU_TYPE) ',
+                1,
+            )
+
+        if new != line:
+            changed += 1
+        out.append(new)
+    else:
+        out.append(line)
+
+if matched != 1:
+    raise SystemExit(f"zlib hook: expected exactly one contrib/minizip configure line, found {matched}")
+
+rules.write_text(''.join(out))
+print(f"ARMHF16K zlib hook: minizip cross configuration verified ({changed} line changed)")
 PY
