@@ -11,18 +11,19 @@ read each native callback slot, create an x86 bridge for the native function,
 and publish the bridge address through the shadow variable. Refresh the
 shadows both for guest XInitThreads calls and for BOX86_X11THREADS startup.
 ---
- src/wrapped/wrappedlibx11.c         | 54 ++++++++++++++++++++++++++++++++++++++++++++++++++----
+ src/wrapped/wrappedlibx11.c         | 53 +++++++++++++++++++++++++++++++++++++++++++++++++----
  src/wrapped/wrappedlibx11_private.h | 16 ++++++++--------
- 2 files changed, 58 insertions(+), 12 deletions(-)
+ 2 files changed, 57 insertions(+), 12 deletions(-)
 
 diff --git a/src/wrapped/wrappedlibx11.c b/src/wrapped/wrappedlibx11.c
 --- a/src/wrapped/wrappedlibx11.c
 +++ b/src/wrapped/wrappedlibx11.c
-@@ -88,6 +88,41 @@ typedef uintptr_t (*LFpii_t)(void*, int32_t, int32_t);
- typedef uintptr_t (*LFpii_t)(void*, int32_t, int32_t);
+@@ -89,12 +89,55 @@
  typedef int32_t (*iFpiiL_t)(void*, int32_t, int32_t, uintptr_t);
  typedef void* (*pFpiiuu_t)(void*, int32_t, int32_t, uint32_t, uint32_t);
  
+-#define ADDED_FUNCTIONS()   \
+-    GO(XInitThreads, uFv_t) \
 +EXPORT uintptr_t my__XCreateMutex_fn = 0;
 +EXPORT uintptr_t my__XFreeMutex_fn = 0;
 +EXPORT uintptr_t my__XLockMutex_fn = 0;
@@ -59,13 +60,11 @@ diff --git a/src/wrapped/wrappedlibx11.c b/src/wrapped/wrappedlibx11.c
 +            (void*)my__XInitDisplayLock_fn, (void*)my__Xthread_self_fn);
 +    }
 +}
-+
--#define ADDED_FUNCTIONS()   \
--    GO(XInitThreads, uFv_t) \
-@@ -96,4 +131,13 @@ typedef void* (*pFpiiuu_t)(void*, int32_t, int32_t, uint32_t, uint32_t);
+ 
+ #include "generated/wrappedlibx11types.h"
  
  #include "wrappercallback.h"
- 
++
 +EXPORT int my_XInitThreads(x86emu_t* emu)
 +{
 +    (void)emu;
@@ -74,9 +73,10 @@ diff --git a/src/wrapped/wrappedlibx11.c b/src/wrapped/wrappedlibx11.c
 +        refreshX11ThreadDataBridges(my_lib);
 +    return ret;
 +}
-+
+ 
  #define SUPER() \
-@@ -1603,11 +1647,13 @@ EXPORT void my_XFreeEventData(x86emu_t* emu, void* dpy, my_XGenericEventCookie_
+ GO(0)   \
+@@ -1603,12 +1646,14 @@
      #define CUSTOM_INIT                 \
          getMy(lib);                     \
          setNeededLibs(lib, 1, "libdl.so"); \
@@ -92,53 +92,80 @@ diff --git a/src/wrapped/wrappedlibx11.c b/src/wrapped/wrappedlibx11.c
 +        refreshX11ThreadDataBridges(lib);
  #endif
  
+ #define CUSTOM_FINI \
 diff --git a/src/wrapped/wrappedlibx11_private.h b/src/wrapped/wrappedlibx11_private.h
 --- a/src/wrapped/wrappedlibx11_private.h
 +++ b/src/wrapped/wrappedlibx11_private.h
-@@ -233,4 +233,4 @@ GOM(XCreateImage, pFEppuiipuuii)
+@@ -232,7 +232,7 @@
+ GOM(XCreateIC, pFEpV)     // use vararg
  GOM(XCreateImage, pFEppuiipuuii)
  GO(dummy_XCreateImage, pFppuiipuuii)    // to have the wrapper
 -DATAB(_XCreateMutex_fn, 4)
 +DATAM(_XCreateMutex_fn, 4)
  //GO(XCreateOC
-@@ -361,3 +361,3 @@ GO(XFreeColors, iFpppiu)
+ GO(XCreatePixmap, pFppuuu)
+ GO(XCreatePixmapCursor, pFpppppuu)
+@@ -359,7 +359,7 @@
+ GO(XFreeColormap, iFpu)
+ GO(XFreeColors, iFpppiu)
  GO(XFreeCursor, iFpp)
 -DATAB(_XFreeDisplayLock_fn, 4)
 +DATAM(_XFreeDisplayLock_fn, 4)
  // _XFreeDisplayStructure
-@@ -374,3 +374,3 @@ GO(XFreeGC, iFpp)
+ // _XFreeEventCookies
+ GOM(XFreeEventData, vFEpp)
+@@ -372,7 +372,7 @@
+ GO(XFreeFontSet, vFpp)
+ GO(XFreeGC, iFpp)
  GO(XFreeModifiermap, iFp)
 -DATAB(_XFreeMutex_fn, 4)
 +DATAM(_XFreeMutex_fn, 4)
  GO(XFreePixmap, iFpp)
-@@ -483,3 +483,3 @@ DATA(_XimXTransSocketUNIXFuncs, 4)
+ GO(XFreeStringList, vFp)
+ // _XFreeTemp
+@@ -481,14 +481,14 @@
+ // _XimXTransWritev
+ // _XInitDefaultIM
  // _XInitDefaultOM
 -DATAB(_XInitDisplayLock_fn, 4)
 +DATAM(_XInitDisplayLock_fn, 4)
  // _XInitDynamicIM
-@@ -489,4 +489,4 @@ GOM(XInitImage, iFEp)
+ // _XInitDynamicOM
+ GO(XInitExtension, pFpp)
+ GOM(XInitImage, iFEp)
  // _XInitImageFuncPtrs
  // _XInitKeysymDB
 -GO(XInitThreads, uFv)
 +GOM(XInitThreads, iFEv)
  //GO(XInsertModifiermapEntry
-@@ -773,4 +773,4 @@ GO(XLocaleOfIM, pFu)
+ GO(XInstallColormap, iFpp)
+ GO(XInternalConnectionNumbers, iFppp)
+@@ -772,7 +772,7 @@
+ GO(XLocaleOfIM, pFu)
  //GO(XLocaleOfOM
  GO(XLockDisplay, vFp)
 -DATAB(_XLockMutex_fn, 4)
 +DATAM(_XLockMutex_fn, 4)
  GO(XLookupColor, iFppppp)
-@@ -1026,4 +1026,4 @@ GO(XTextWidth, iFppi)
+ GO(XLookupKeysym, uFpi)
+ // _XLookupKeysym
+@@ -1025,7 +1025,7 @@
+ //GO(XTextPropertyToStringList
  GO(XTextWidth, iFppi)
  GO(XTextWidth16, iFppi)
 -DATAB(_Xthread_self_fn, 4)
 +DATAM(_Xthread_self_fn, 4)
  GO(XTranslateCoordinates, iFpppiippp)
-@@ -1046,4 +1046,4 @@ GO(XUnloadFont, iFpp)
+ // _XTranslateKey
+ // _XTranslateKeySym
+@@ -1045,7 +1045,7 @@
+ // _XUnknownWireEventCookie
  GO(XUnloadFont, iFpp)
  GO(XUnlockDisplay, vFp)
 -DATAB(_XUnlockMutex_fn, 4)
 +DATAM(_XUnlockMutex_fn, 4)
  GO(XUnmapSubwindows, iFpp)
+ GO(XUnmapWindow, iFpp)
+ // _XUnregisterFilter
 -- 
 2.39.5
