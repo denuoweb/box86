@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 SOURCE=${1:-}
 HOST_ARCH=${HOST_ARCH:-armhf}
-BUILD_ARCH=${BUILD_ARCH:-$(dpkg --print-architecture)}
+BUILD_ARCH=${BUILD_ARCH:-$HOST_ARCH}
 PAGE_SIZE=${PAGE_SIZE:-16384}
 PAGE_HEX=$(printf '0x%x' "$PAGE_SIZE")
 WORK_ROOT=${ARMHF16K_WORK:-"$ROOT/armhf16k/work"}
@@ -27,15 +27,18 @@ for x in apt-get dpkg dpkg-source dpkg-parsechangelog dch python3 readelf sbuild
     need "$x"
 done
 
+if [[ "$BUILD_ARCH" != "$HOST_ARCH" ]]; then
+    echo "ARMHF16K now requires a native build root: BUILD_ARCH=$BUILD_ARCH HOST_ARCH=$HOST_ARCH" >&2
+    echo "Unset BUILD_ARCH or set BUILD_ARCH=$HOST_ARCH, then rerun bootstrap." >&2
+    exit 3
+fi
+
 if [[ ! -r "$SBUILD_TARBALL" ]]; then
-    echo "Missing isolated sbuild base: $SBUILD_TARBALL" >&2
+    echo "Missing isolated native sbuild base: $SBUILD_TARBALL" >&2
     echo "Run: bash scripts/armhf16k-bootstrap-debian13.sh" >&2
     exit 3
 fi
 
-# Resolve through apt-get's source command itself instead of inferring source
-# availability from apt-cache. --print-uris performs resolution without a
-# download and fails if the source package cannot be selected.
 if ! apt-get --print-uris --only-source source "$SOURCE" >/dev/null 2>&1; then
     echo "APT cannot resolve source package '$SOURCE'. Run: bash scripts/armhf16k-bootstrap-debian13.sh" >&2
     exit 3
@@ -99,9 +102,6 @@ if marker not in text:
     rules.write_text("".join(lines))
 PY
 
-# Recreate a source package containing our hook and linker-policy changes.
-# For 3.0 (quilt) sources dpkg-source expects the original tarball next to the
-# source tree; keep Debian's downloaded orig archives intact for that purpose.
 find "$FETCH" -maxdepth 1 -type f -name '*.orig.tar.*' -exec cp -f {} "$WORK/" \;
 (
     cd "$WORK"
@@ -114,23 +114,22 @@ if [[ -z "$LOCAL_DSC" || ! -f "$LOCAL_DSC" ]]; then
     exit 5
 fi
 
-echo "Building $SOURCE in isolated sbuild environment"
+echo "Building $SOURCE in isolated native $BUILD_ARCH sbuild environment"
 echo "build=$BUILD_ARCH host=$HOST_ARCH page=$PAGE_SIZE"
 echo "sbuild base: $SBUILD_TARBALL"
 
 SBUILD_ARGS=(
     --chroot-mode=unshare
     --chroot="$SBUILD_TARBALL"
-    --build="$BUILD_ARCH"
-    --host="$HOST_ARCH"
+    --arch="$BUILD_ARCH"
     --dist="$CODENAME"
-    --profiles=cross,nocheck
+    --profiles=nocheck
     --no-arch-all
     --no-run-lintian
     --no-run-piuparts
     --no-run-autopkgtest
+    --bd-uninstallable-explainer=apt
     --build-dir="$RESULT"
-    --add-depends-arch="crossbuild-essential-${HOST_ARCH}"
 )
 
 # Make earlier ARMHF16K builds available to dependency resolution without
@@ -147,8 +146,6 @@ if [[ ${#DEBS[@]} -eq 0 ]]; then
     exit 6
 fi
 
-# Do not publish a source build unless every ARM ELF shipped by its binary
-# packages satisfies the 16K PT_LOAD congruence invariant.
 python3 "$ROOT/scripts/armhf16k-verify-debs.py" --page-size "$PAGE_SIZE" "${DEBS[@]}"
 
 for deb in "${DEBS[@]}"; do
