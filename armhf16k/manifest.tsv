@@ -6,6 +6,7 @@
 40	libxcb	libxcb1,libxcb-randr0,libxcb-sync1,libxcb-present0,libxcb-xfixes0,libxcb-dri3-0,libxcb-shm0
 42	libxi	libxi6
 44	libasyncns	libasyncns0
+46	libogg	libogg0
 50	mesa-pi5-private	mesa-libgallium,libglx-mesa0,libegl-mesa0,libgbm1
 60	libglvnd-private	libgl1,libglx0,libegl1,libglvnd0
 70	private-runtime	box86-armhf16k-runtime
