@@ -125,8 +125,15 @@ cat >"$GUEST/etc/apt/sources.list.d/armhf16k-local.list" <<'EOF'
 deb [trusted=yes] file:/armhf16k-repo ./
 EOF
 
+# Confirm qemu-arm itself can execute the extracted guest before adding PRoot's
+# tracing/path-translation layer.
+if ! qemu-arm -L "$GUEST" "$GUEST/bin/true"; then
+    echo "Direct qemu-arm smoke test failed in disposable ARMHF root" >&2
+    exit 5
+fi
+
 proot_guest() {
-    proot \
+    env PROOT_NO_SECCOMP=1 proot \
         -S "$GUEST" \
         -q qemu-arm \
         -b "$WORK:/work" \
@@ -138,6 +145,7 @@ proot_guest() {
 echo "Building $SOURCE in isolated ARMHF PRoot/QEMU environment"
 echo "guest=$HOST_ARCH page=$PAGE_SIZE"
 echo "PRoot base: $PROOT_BASE"
+echo "PRoot seccomp acceleration: disabled"
 
 proot_guest /bin/sh -lc \
     "export DEBIAN_FRONTEND=noninteractive; apt-get update && apt-get -y --no-install-recommends build-dep '$SOURCE'"
