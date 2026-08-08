@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+trap 'rc=$?; echo "ERROR: ${BASH_SOURCE[0]}:${LINENO}: command failed (rc=$rc): $BASH_COMMAND" >&2; exit $rc' ERR
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 HOST_ARCH=${HOST_ARCH:-armhf}
@@ -29,8 +30,11 @@ $SUDO apt-get install -y --no-install-recommends \
     libzstd-dev:${HOST_ARCH} zlib1g-dev:${HOST_ARCH} \
     libudev-dev:${HOST_ARCH} libglvnd-dev:${HOST_ARCH}
 
-CANDIDATE=$(apt-cache policy "mesa-libgallium:${HOST_ARCH}" | awk '/Candidate:/ {print $2; exit}')
+# Do not exit awk early under pipefail: doing so can SIGPIPE apt-cache and make
+# the assignment terminate the script silently with status 141.
+CANDIDATE=$(apt-cache policy "mesa-libgallium:${HOST_ARCH}" | awk '/Candidate:/ {candidate=$2} END {print candidate}')
 [[ -n "$CANDIDATE" && "$CANDIDATE" != "(none)" ]] || { echo "Cannot determine mesa-libgallium:$HOST_ARCH candidate" >&2; exit 3; }
+echo "Mesa ARMHF candidate: $CANDIDATE"
 
 rm -rf "$WORK" "$OUT"
 mkdir -p "$WORK/pi-fetch" "$WORK/debian-security-fetch" "$OUT"
@@ -54,7 +58,7 @@ echo "Fetching Raspberry Pi Mesa source: $DSC_URL"
     cd "$WORK/pi-fetch"
     dget -u "$DSC_URL"
 )
-PI_DSC=$(find "$WORK/pi-fetch" -maxdepth 1 -type f -name 'mesa_*.dsc' -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)
+PI_DSC=$(find "$WORK/pi-fetch" -maxdepth 1 -type f -name 'mesa_*.dsc' -print -quit)
 [[ -n "$PI_DSC" && -f "$PI_DSC" ]] || { echo "Raspberry Pi Mesa .dsc was not downloaded" >&2; exit 4; }
 dpkg-source -x "$PI_DSC" "$WORK/src"
 
@@ -67,7 +71,7 @@ echo "Fetching Debian Mesa security source: $DEBIAN_SECURITY_VERSION"
     cd "$WORK/debian-security-fetch"
     apt-get --download-only --only-source source "mesa=$DEBIAN_SECURITY_VERSION"
 )
-SEC_DSC=$(find "$WORK/debian-security-fetch" -maxdepth 1 -type f -name 'mesa_*.dsc' -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)
+SEC_DSC=$(find "$WORK/debian-security-fetch" -maxdepth 1 -type f -name 'mesa_*.dsc' -print -quit)
 [[ -n "$SEC_DSC" && -f "$SEC_DSC" ]] || {
     echo "Debian Mesa security source $DEBIAN_SECURITY_VERSION is unavailable." >&2
     echo "Refusing to build a Pi Mesa runtime without the Trixie security backport." >&2
