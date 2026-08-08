@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 HOST_ARCH=${HOST_ARCH:-armhf}
 BUILD_ARCH=${BUILD_ARCH:-$HOST_ARCH}
 SUDO=${SUDO:-sudo}
 DEBIAN_SRC_FILE=${DEBIAN_SRC_FILE:-/etc/apt/sources.list.d/armhf16k-debian-src.sources}
 DEBIAN_KEYRING=${DEBIAN_KEYRING:-}
+QEMU_BINFMT="$ROOT/scripts/armhf16k-qemu-arm-binfmt.sh"
 
 if ! command -v apt-get >/dev/null 2>&1; then
     echo "This bootstrap targets Debian/apt systems." >&2
@@ -89,7 +91,7 @@ $SUDO apt-get install -y --no-install-recommends \
     debootstrap \
     mmdebstrap \
     uidmap \
-    arch-test
+    qemu-user
 
 if ! source_resolves zlib; then
     cat >&2 <<MSG
@@ -115,17 +117,14 @@ MSG
     exit 4
 fi
 
-if ! arch-test "$BUILD_ARCH" >/dev/null 2>&1; then
-    cat >&2 <<MSG
-The current machine/kernel cannot execute Debian $BUILD_ARCH binaries natively.
-ARMHF16K intentionally uses a native $BUILD_ARCH sbuild root to avoid Debian
-cross-build dependency limitations. Check with:
-  arch-test $BUILD_ARCH
-MSG
-    exit 5
-fi
-
-echo "Verified native execution support: $BUILD_ARCH"
+# AArch64 normally executes ARMHF directly, so Debian intentionally does not
+# register qemu-arm through qemu-user-binfmt on arm64. On this 16K-page host,
+# however, stock Debian ARMHF bootstrap binaries can still be 4K-only ELFs and
+# fail before a native ARMHF build root can exist. ARMHF16K therefore enables a
+# private QEMU ARM binfmt only while bootstrapping/building and removes it again
+# afterwards. QEMU supplies the temporary bootstrap bridge; produced packages
+# are still native ARMHF and must pass the 16K ELF verifier.
+[[ -r "$QEMU_BINFMT" ]] || { echo "Missing QEMU binfmt helper: $QEMU_BINFMT" >&2; exit 5; }
 
 sbuild_tarball_valid() {
     [[ -r "$SBUILD_TARBALL" ]] || return 1
@@ -138,19 +137,24 @@ if [[ -e "$SBUILD_TARBALL" ]] && ! sbuild_tarball_valid; then
 fi
 
 if ! sbuild_tarball_valid; then
-    echo "Creating isolated native $BUILD_ARCH sbuild base: $SBUILD_TARBALL"
+    echo "Creating isolated ARMHF sbuild base through temporary QEMU execution: $SBUILD_TARBALL"
     mkdir -p "$(dirname "$SBUILD_TARBALL")"
     tmpdir=$(mktemp -d)
+    qemu_enabled=0
 
-    # Keep the staging directory so sbuild-createchroot does not attempt to
-    # remove outer-namespace root-owned /dev nodes itself. Once the tarball is
-    # complete, remove only this exact mktemp tree through sudo.
-    cleanup_tmpdir() {
+    cleanup_bootstrap() {
+        if [[ "$qemu_enabled" -eq 1 ]]; then
+            bash "$QEMU_BINFMT" disable || true
+            qemu_enabled=0
+        fi
         if [[ -n "${tmpdir:-}" && -d "$tmpdir" ]]; then
             $SUDO rm -rf --one-file-system -- "$tmpdir" || true
         fi
     }
-    trap cleanup_tmpdir EXIT
+    trap cleanup_bootstrap EXIT INT TERM
+
+    bash "$QEMU_BINFMT" enable
+    qemu_enabled=1
 
     sbuild-createchroot \
         --chroot-mode=unshare \
@@ -160,9 +164,9 @@ if ! sbuild_tarball_valid; then
         --make-sbuild-tarball="$SBUILD_TARBALL" \
         "$CODENAME" "$tmpdir" http://deb.debian.org/debian
 
-    cleanup_tmpdir
+    cleanup_bootstrap
     tmpdir=
-    trap - EXIT
+    trap - EXIT INT TERM
 fi
 
 if ! sbuild_tarball_valid; then
@@ -170,5 +174,5 @@ if ! sbuild_tarball_valid; then
     exit 6
 fi
 
-echo "Verified isolated native sbuild base: $SBUILD_TARBALL"
+echo "Verified isolated ARMHF sbuild base: $SBUILD_TARBALL"
 echo "ARMHF16K build prerequisites are installed."
