@@ -106,6 +106,9 @@ bash "$ROOT/scripts/armhf16k-meson-cross-file.sh" "$CROSS" >/dev/null
 
 # Raspberry Pi 5 hardware uses the V3D Gallium and Broadcom V3DV paths. Build
 # only that hardware closure; LLVMpipe and unrelated GPU drivers are omitted.
+# xlib-lease only enables VK_EXT_acquire_xlib_display. Disable it so the private
+# runtime keeps the required xcb-randr Vulkan path without adding libXrandr to
+# the ARMHF closure.
 meson setup "$WORK/build" "$WORK/src" \
     --cross-file "$CROSS" \
     --prefix=/usr \
@@ -113,6 +116,7 @@ meson setup "$WORK/build" "$WORK/src" \
     --buildtype=release \
     -Dgallium-drivers=v3d \
     -Dvulkan-drivers=broadcom \
+    -Dxlib-lease=disabled \
     -Dllvm=disabled \
     -Dplatforms=x11,wayland \
     -Dglx=dri \
