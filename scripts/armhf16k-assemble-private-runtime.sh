@@ -7,7 +7,7 @@ MESA_ROOT=${ARMHF16K_MESA_ROOT:-"$ROOT/armhf16k/private/mesa-root"}
 GLVND_ROOT=${ARMHF16K_GLVND_ROOT:-"$ROOT/armhf16k/private/glvnd-root"}
 WORK=${ARMHF16K_RUNTIME_WORK:-"$ROOT/armhf16k/work/private-runtime"}
 DIST=${DISTDIR:-"$ROOT/dist"}
-VERSION=${ARMHF16K_RUNTIME_VERSION:-1.0+16k5}
+VERSION=${ARMHF16K_RUNTIME_VERSION:-1.0+16k6}
 PREFIX=/usr/lib/box86-16k/native16k
 PKGROOT="$WORK/pkg"
 NATIVE="$PKGROOT$PREFIX"
@@ -38,6 +38,7 @@ found_xdmcp=0
 found_xcb=0
 found_xi=0
 found_asyncns=0
+found_ogg=0
 for deb in "$POOL"/*.deb; do
     [ -f "$deb" ] || continue
     pkg=$(dpkg-deb -f "$deb" Package)
@@ -48,6 +49,7 @@ for deb in "$POOL"/*.deb; do
         libxdmcp6) found_xdmcp=1 ;;
         libxi6) found_xi=1 ;;
         libasyncns0) found_asyncns=1 ;;
+        libogg0) found_ogg=1 ;;
         libxcb*-dev|*-dbgsym) continue ;;
         libxcb*) found_xcb=1 ;;
         *) continue ;;
@@ -59,9 +61,9 @@ for deb in "$POOL"/*.deb; do
     copy_lib_tree "$dir/usr/lib/arm-linux-gnueabihf"
 done
 
-[[ $found_zlib -eq 1 && $found_bsd -eq 1 && $found_xau -eq 1 && $found_xdmcp -eq 1 && $found_xcb -eq 1 && $found_xi -eq 1 && $found_asyncns -eq 1 ]] || {
-    echo "Low-level package pool is incomplete (zlib=$found_zlib bsd=$found_bsd xau=$found_xau xdmcp=$found_xdmcp xcb=$found_xcb xi=$found_xi asyncns=$found_asyncns)." >&2
-    echo "Build stages zlib, libbsd, libxau, libxdmcp, libxcb, libxi and libasyncns first." >&2
+[[ $found_zlib -eq 1 && $found_bsd -eq 1 && $found_xau -eq 1 && $found_xdmcp -eq 1 && $found_xcb -eq 1 && $found_xi -eq 1 && $found_asyncns -eq 1 && $found_ogg -eq 1 ]] || {
+    echo "Low-level package pool is incomplete (zlib=$found_zlib bsd=$found_bsd xau=$found_xau xdmcp=$found_xdmcp xcb=$found_xcb xi=$found_xi asyncns=$found_asyncns ogg=$found_ogg)." >&2
+    echo "Build stages zlib, libbsd, libxau, libxdmcp, libxcb, libxi, libasyncns and libogg first." >&2
     exit 4
 }
 
@@ -104,7 +106,7 @@ done < <(find "$NATIVE" -type f -print0)
 
 # Sanity-check the hard dependencies that have stopped Steam/steamui.so during
 # real 16K-host validation.
-for soname in libGL.so.1 libGLX.so.0 libEGL.so.1 libxcb.so.1 libXau.so.6 libXdmcp.so.6 libXi.so.6 libasyncns.so.0 libz.so.1; do
+for soname in libGL.so.1 libGLX.so.0 libEGL.so.1 libxcb.so.1 libXau.so.6 libXdmcp.so.6 libXi.so.6 libasyncns.so.0 libogg.so.0 libz.so.1; do
     find "$NATIVE" -maxdepth 1 \( -type f -o -type l \) -name "$soname" -print -quit | grep -q . || {
         echo "Private runtime is missing $soname" >&2
         exit 5
@@ -141,7 +143,7 @@ Architecture: armhf
 Maintainer: DenuoWeb <5424250+denuoweb@users.noreply.github.com>
 Depends: libc6 (>= 2.38), libdrm2, libx11-6, libxext6, libx11-xcb1, libwayland-client0, libwayland-server0, libexpat1, libzstd1, libgcc-s1, libstdc++6
 Description: Private 16K-compatible ARMHF native runtime for Box86
- Provides Box86 with a private ARMHF GL/X11 dependency closure for 16 KiB-page
+ Provides Box86 with a private ARMHF GL/X11/audio dependency closure for 16 KiB-page
  hosts. Includes Pi V3D/VC4/V3DV Mesa, GLVND, and rebuilt low-level libraries.
 EOF
 
