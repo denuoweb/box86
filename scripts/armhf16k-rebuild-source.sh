@@ -9,6 +9,7 @@ PAGE_SIZE=${PAGE_SIZE:-16384}
 PAGE_HEX=$(printf '0x%x' "$PAGE_SIZE")
 WORK_ROOT=${ARMHF16K_WORK:-"$ROOT/armhf16k/work"}
 POOL=${ARMHF16K_POOL:-"$ROOT/armhf16k/repo/pool"}
+QEMU_BINFMT="$ROOT/scripts/armhf16k-qemu-arm-binfmt.sh"
 
 if [[ -r /etc/os-release ]]; then
     # shellcheck disable=SC1091
@@ -28,16 +29,18 @@ for x in apt-get dpkg dpkg-source dpkg-parsechangelog dch python3 readelf sbuild
 done
 
 if [[ "$BUILD_ARCH" != "$HOST_ARCH" ]]; then
-    echo "ARMHF16K now requires a native build root: BUILD_ARCH=$BUILD_ARCH HOST_ARCH=$HOST_ARCH" >&2
+    echo "ARMHF16K requires an ARMHF build root: BUILD_ARCH=$BUILD_ARCH HOST_ARCH=$HOST_ARCH" >&2
     echo "Unset BUILD_ARCH or set BUILD_ARCH=$HOST_ARCH, then rerun bootstrap." >&2
     exit 3
 fi
 
 if [[ ! -r "$SBUILD_TARBALL" ]]; then
-    echo "Missing isolated native sbuild base: $SBUILD_TARBALL" >&2
+    echo "Missing isolated ARMHF sbuild base: $SBUILD_TARBALL" >&2
     echo "Run: bash scripts/armhf16k-bootstrap-debian13.sh" >&2
     exit 3
 fi
+
+[[ -r "$QEMU_BINFMT" ]] || { echo "Missing QEMU binfmt helper: $QEMU_BINFMT" >&2; exit 3; }
 
 if ! apt-get --print-uris --only-source source "$SOURCE" >/dev/null 2>&1; then
     echo "APT cannot resolve source package '$SOURCE'. Run: bash scripts/armhf16k-bootstrap-debian13.sh" >&2
@@ -114,7 +117,7 @@ if [[ -z "$LOCAL_DSC" || ! -f "$LOCAL_DSC" ]]; then
     exit 5
 fi
 
-echo "Building $SOURCE in isolated native $BUILD_ARCH sbuild environment"
+echo "Building $SOURCE in isolated ARMHF sbuild environment via temporary QEMU bootstrap execution"
 echo "build=$BUILD_ARCH host=$HOST_ARCH page=$PAGE_SIZE"
 echo "sbuild base: $SBUILD_TARBALL"
 
@@ -138,7 +141,25 @@ if compgen -G "$POOL/*.deb" >/dev/null; then
     SBUILD_ARGS+=(--extra-package="$POOL")
 fi
 
+# Stock Trixie ARMHF build tools can themselves be 4K-linked and therefore
+# cannot be executed directly by the 16K arm64 host kernel. Route ARM32 ELF
+# execution through QEMU only for the duration of this isolated build. The
+# resulting native ARMHF packages are then verified for direct 16K loading.
+qemu_enabled=0
+cleanup_qemu() {
+    if [[ "$qemu_enabled" -eq 1 ]]; then
+        bash "$QEMU_BINFMT" disable || true
+        qemu_enabled=0
+    fi
+}
+trap cleanup_qemu EXIT INT TERM
+bash "$QEMU_BINFMT" enable
+qemu_enabled=1
+
 sbuild "${SBUILD_ARGS[@]}" "$LOCAL_DSC"
+
+cleanup_qemu
+trap - EXIT INT TERM
 
 mapfile -t DEBS < <(find "$RESULT" -maxdepth 1 -type f -name "*_${HOST_ARCH}.deb" ! -name '*-dbgsym_*' -print | sort)
 if [[ ${#DEBS[@]} -eq 0 ]]; then
