@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+trap 'rc=$?; echo "ERROR: ${BASH_SOURCE[0]}:${LINENO}: command failed (rc=$rc): $BASH_COMMAND" >&2; exit $rc' ERR
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 SOURCE=${1:-}
@@ -46,9 +47,6 @@ SRC="$WORK/src"
 rm -rf "$WORK"
 mkdir -p "$FETCH" "$POOL"
 
-# These four source packages were already cross-built successfully on the Pi.
-# Keep that proven path rather than dragging the graphics stack through a full
-# ARMHF build root.
 echo "Installing cross-build dependencies for $SOURCE ($HOST_ARCH)"
 $SUDO apt-get -y --no-install-recommends --host-architecture="$HOST_ARCH" --only-source build-dep "$SOURCE"
 
@@ -58,7 +56,7 @@ echo "Fetching Debian source: $SOURCE"
     apt-get --download-only --only-source source "$SOURCE"
 )
 
-DSC=$(find "$FETCH" -maxdepth 1 -type f -name '*.dsc' -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)
+DSC=$(find "$FETCH" -maxdepth 1 -type f -name '*.dsc' -print -quit)
 [[ -n "$DSC" && -f "$DSC" ]] || { echo "No .dsc found for $SOURCE" >&2; exit 4; }
 dpkg-source -x "$DSC" "$SRC"
 
@@ -75,7 +73,7 @@ SOURCE_VERSION=$(dpkg-parsechangelog -l"$SRC/debian/changelog" -S Version)
 TARGET_BINARY=$(awk -F'\t' -v src="$SOURCE" '$2 == src {split($3,a,","); print a[1]; exit}' "$MANIFEST")
 CANDIDATE=
 if [[ -n "$TARGET_BINARY" ]]; then
-    CANDIDATE=$(apt-cache policy "${TARGET_BINARY}:${HOST_ARCH}" 2>/dev/null | awk '/Candidate:/ {print $2; exit}')
+    CANDIDATE=$(apt-cache policy "${TARGET_BINARY}:${HOST_ARCH}" 2>/dev/null | awk '/Candidate:/ {candidate=$2} END {print candidate}')
 fi
 if [[ -n "$CANDIDATE" && "$CANDIDATE" != "(none)" && "$CANDIDATE" == "$SOURCE_VERSION"* ]]; then
     LOCAL_VERSION="${CANDIDATE}+${LOCAL_REVISION}"
