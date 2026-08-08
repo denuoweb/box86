@@ -1,3 +1,13 @@
+box86-16k (0.3.8+git20260807.0579f8b+16k10) unstable; urgency=medium
+
+  * Preserve i386 4K madvise semantics on 16K hosts, including raw syscall 219.
+  * Size Box86 bridge bricks from the actual host page size, matching Box64's
+    large-page bridge allocator instead of hard-coding 4096 bytes.
+  * Extend the 16K ELF regression to verify that each bridge brick occupies one
+    complete host page before exercising the ELF32 mapping path.
+
+ -- DenuoWeb <5424250+denuoweb@users.noreply.github.com>  Sat, 08 Aug 2026 01:31:00 -0700
+
 box86-16k (0.3.8+git20260807.0579f8b+16k8) unstable; urgency=medium
 
   * Port Box64 non-4K ELF32 loader handling to Box86.
