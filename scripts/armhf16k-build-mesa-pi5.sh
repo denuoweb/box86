@@ -7,12 +7,14 @@ SUDO=${SUDO:-sudo}
 WORK=${ARMHF16K_MESA_WORK:-"$ROOT/armhf16k/work/mesa-pi5-private"}
 OUT=${ARMHF16K_MESA_ROOT:-"$ROOT/armhf16k/private/mesa-root"}
 PAGE_SIZE=${PAGE_SIZE:-16384}
+DEBIAN_SECURITY_VERSION=${ARMHF16K_MESA_DEBIAN_SECURITY_VERSION:-25.0.7-2+deb13u1}
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing tool: $1" >&2; exit 2; }; }
-for x in apt-cache curl dget dpkg-source meson ninja readelf python3; do need "$x"; done
+for x in apt-cache apt-get curl dget dpkg dpkg-source meson ninja readelf python3; do need "$x"; done
 
-# Only install the development surface needed by the Raspberry Pi graphics
-# drivers. In particular, do not install LLVM or libelf development packages.
+# Only install the development surface needed by Raspberry Pi V3D/V3DV. Do not
+# install LLVM or libelf development packages: they are not part of the Pi5
+# hardware-driver closure we are building.
 $SUDO apt-get install -y --no-install-recommends \
     meson ninja-build pkg-config python3-mako python3-yaml python3-packaging python3-ply \
     bison flex \
@@ -31,46 +33,86 @@ CANDIDATE=$(apt-cache policy "mesa-libgallium:${HOST_ARCH}" | awk '/Candidate:/ 
 [[ -n "$CANDIDATE" && "$CANDIDATE" != "(none)" ]] || { echo "Cannot determine mesa-libgallium:$HOST_ARCH candidate" >&2; exit 3; }
 
 rm -rf "$WORK" "$OUT"
-mkdir -p "$WORK/fetch" "$OUT"
+mkdir -p "$WORK/pi-fetch" "$WORK/debian-security-fetch" "$OUT"
 
-# Raspberry Pi OS carries Pi-specific Mesa packaging. Fetch the matching source
-# directly from the Raspberry Pi archive instead of silently substituting the
-# generic Debian source. Try the exact binary version first; if the binary is a
-# security-revision suffix, also try the Raspberry Pi base revision.
-VERSIONS=("$CANDIDATE")
-case "$CANDIDATE" in
-    *+deb13u*) VERSIONS+=("${CANDIDATE%%+deb13u*}") ;;
+# Raspberry Pi OS carries Pi-specific Mesa changes. The archive currently keeps
+# the Pi source revision separately from Debian's stable-security suffix, so
+# derive the Pi base version from the installed candidate when needed.
+PI_VERSION="$CANDIDATE"
+case "$PI_VERSION" in
+    *+deb13u*) PI_VERSION=${PI_VERSION%%+deb13u*} ;;
 esac
-
-DSC_URL=
-for version in "${VERSIONS[@]}"; do
-    url="https://archive.raspberrypi.com/debian/pool/main/m/mesa/mesa_${version}.dsc"
-    if curl -fsIL "$url" >/dev/null 2>&1; then
-        DSC_URL=$url
-        break
-    fi
-done
-[[ -n "$DSC_URL" ]] || {
-    echo "Could not locate Raspberry Pi Mesa source matching $CANDIDATE" >&2
-    echo "Refusing to build generic Debian Mesa in place of the Pi-specific source." >&2
+DSC_URL="https://archive.raspberrypi.com/debian/pool/main/m/mesa/mesa_${PI_VERSION}.dsc"
+if ! curl -fsIL "$DSC_URL" >/dev/null 2>&1; then
+    echo "Could not locate Raspberry Pi Mesa source: $DSC_URL" >&2
+    echo "Refusing to substitute generic Debian Mesa for the Pi-specific source." >&2
     exit 3
-}
+fi
 
 echo "Fetching Raspberry Pi Mesa source: $DSC_URL"
 (
-    cd "$WORK/fetch"
+    cd "$WORK/pi-fetch"
     dget -u "$DSC_URL"
 )
-DSC=$(find "$WORK/fetch" -maxdepth 1 -type f -name 'mesa_*.dsc' -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)
-[[ -n "$DSC" && -f "$DSC" ]] || { echo "Mesa .dsc was not downloaded" >&2; exit 4; }
-dpkg-source -x "$DSC" "$WORK/src"
+PI_DSC=$(find "$WORK/pi-fetch" -maxdepth 1 -type f -name 'mesa_*.dsc' -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)
+[[ -n "$PI_DSC" && -f "$PI_DSC" ]] || { echo "Raspberry Pi Mesa .dsc was not downloaded" >&2; exit 4; }
+dpkg-source -x "$PI_DSC" "$WORK/src"
+
+# Debian Trixie 25.0.7-2+deb13u1 fixes CVE-2026-40393 with three quilt
+# patches. Pi's rpt4 source is based on the same 25.0.7 upstream but the public
+# Pi source archive does not carry the +deb13u1 source suffix, so explicitly
+# layer those stable-security patches onto the Pi tree. Never silently fall
+# back to the pre-security Pi source alone.
+echo "Fetching Debian Mesa security source: $DEBIAN_SECURITY_VERSION"
+(
+    cd "$WORK/debian-security-fetch"
+    apt-get --download-only --only-source source "mesa=$DEBIAN_SECURITY_VERSION"
+)
+SEC_DSC=$(find "$WORK/debian-security-fetch" -maxdepth 1 -type f -name 'mesa_*.dsc' -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)
+[[ -n "$SEC_DSC" && -f "$SEC_DSC" ]] || {
+    echo "Debian Mesa security source $DEBIAN_SECURITY_VERSION is unavailable." >&2
+    echo "Refusing to build a Pi Mesa runtime without the Trixie security backport." >&2
+    exit 4
+}
+dpkg-source -x "$SEC_DSC" "$WORK/debian-security-src"
+
+python3 - "$WORK/debian-security-src" "$WORK/src" <<'PY'
+from pathlib import Path
+import shutil
+import sys
+
+security = Path(sys.argv[1]) / "debian/patches"
+target = Path(sys.argv[2]) / "debian/patches"
+required = [
+    "backport_STACK_ARRAY.patch",
+    "CVE 2026 40393 part1.patch",
+    "CVE 2026 40393 part2.patch",
+]
+series = target / "series"
+lines = series.read_text().splitlines() if series.exists() else []
+for name in required:
+    src = security / name
+    if not src.is_file():
+        raise SystemExit(f"Debian security source is missing required patch: {name}")
+    dst = target / name
+    shutil.copy2(src, dst)
+    if name not in lines:
+        lines.append(name)
+series.write_text("\n".join(lines) + "\n")
+print("Applied Debian Trixie Mesa CVE-2026-40393 patch series to Raspberry Pi source")
+PY
+
+# Apply the newly appended security quilt patches to the unpacked Pi source.
+(
+    cd "$WORK/src"
+    QUILT_PATCHES=debian/patches quilt push -a
+)
 
 CROSS="$WORK/armhf.ini"
 bash "$ROOT/scripts/armhf16k-meson-cross-file.sh" "$CROSS" >/dev/null
 
-# Mesa's own Pi5 CI configuration uses gallium=v3d and vulkan=broadcom. LLVM
-# and libelf are intentionally excluded: LLVMpipe is not needed for the Pi5
-# hardware path, and Mesa documents libelf as Radeon-specific build input.
+# Raspberry Pi 5 hardware uses the V3D Gallium and Broadcom V3DV paths. Build
+# only that hardware closure; LLVMpipe and unrelated GPU drivers are omitted.
 meson setup "$WORK/build" "$WORK/src" \
     --cross-file "$CROSS" \
     --prefix=/usr \
@@ -104,5 +146,5 @@ for so in "${GALLIUM[@]}"; do
     fi
 done
 
-echo "PASS: Pi5 Mesa is 16K-compatible and its Gallium closure has no libLLVM/libelf dependency"
+echo "PASS: Pi5 Mesa is 16K-compatible, security-patched, and has no libLLVM/libelf dependency"
 echo "Mesa staging root: $OUT"
