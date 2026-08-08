@@ -1,3 +1,12 @@
+box86-16k (0.3.8+git20260807.0579f8b+16k12) unstable; urgency=medium
+
+  * Bridge libX11 thread function-pointer globals through Box86-owned DATAM
+    shadows instead of exposing native ARM function pointers to i386 callers.
+  * Refresh the X11 thread callback bridges after XInitThreads, including the
+    BOX86_X11THREADS startup path, and emit WATCH_X11_THREAD_BRIDGES.
+
+ -- DenuoWeb <5424250+denuoweb@users.noreply.github.com>  Sat, 08 Aug 2026 14:05:00 -0700
+
 box86-16k (0.3.8+git20260807.0579f8b+16k11) unstable; urgency=medium
 
   * Add targeted WATCH_BRIDGE diagnostics for the live bridge entry at
