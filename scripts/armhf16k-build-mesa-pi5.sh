@@ -10,14 +10,14 @@ PAGE_SIZE=${PAGE_SIZE:-16384}
 DEBIAN_SECURITY_VERSION=${ARMHF16K_MESA_DEBIAN_SECURITY_VERSION:-25.0.7-2+deb13u1}
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing tool: $1" >&2; exit 2; }; }
-for x in apt-cache apt-get curl dget dpkg dpkg-source meson ninja readelf python3; do need "$x"; done
+for x in apt-cache apt-get curl dget dpkg dpkg-source meson ninja readelf python3 quilt; do need "$x"; done
 
 # Only install the development surface needed by Raspberry Pi V3D/V3DV. Do not
 # install LLVM or libelf development packages: they are not part of the Pi5
 # hardware-driver closure we are building.
 $SUDO apt-get install -y --no-install-recommends \
     meson ninja-build pkg-config python3-mako python3-yaml python3-packaging python3-ply \
-    bison flex \
+    bison flex quilt \
     libdrm-dev:${HOST_ARCH} \
     libexpat1-dev:${HOST_ARCH} \
     libx11-dev:${HOST_ARCH} libx11-xcb-dev:${HOST_ARCH} libxext-dev:${HOST_ARCH} libxfixes-dev:${HOST_ARCH} \
@@ -85,8 +85,8 @@ security = Path(sys.argv[1]) / "debian/patches"
 target = Path(sys.argv[2]) / "debian/patches"
 required = [
     "backport_STACK_ARRAY.patch",
-    "CVE 2026 40393 part1.patch",
-    "CVE 2026 40393 part2.patch",
+    "CVE-2026-40393-part1.patch",
+    "CVE-2026-40393-part2.patch",
 ]
 series = target / "series"
 lines = series.read_text().splitlines() if series.exists() else []
