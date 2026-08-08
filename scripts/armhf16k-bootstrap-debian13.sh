@@ -139,14 +139,29 @@ if [[ ! -f "$SBUILD_TARBALL" ]]; then
     echo "Creating isolated native $BUILD_ARCH sbuild base: $SBUILD_TARBALL"
     mkdir -p "$(dirname "$SBUILD_TARBALL")"
     tmpdir=$(mktemp -d)
-    trap 'rm -rf "$tmpdir"' EXIT
+
+    # File-type chroots normally ask sbuild-createchroot to delete the staging
+    # directory. With the unshare backend, /dev entries in a native ARMHF root
+    # can remain owned as root from the outer namespace and ordinary rm then
+    # fails with EPERM. Keep the staging tree until the tarball is complete and
+    # clean this exact mktemp directory through sudo afterwards.
+    cleanup_tmpdir() {
+        if [[ -n "${tmpdir:-}" && -d "$tmpdir" ]]; then
+            $SUDO rm -rf --one-file-system -- "$tmpdir" || true
+        fi
+    }
+    trap cleanup_tmpdir EXIT
+
     sbuild-createchroot \
         --chroot-mode=unshare \
         --arch="$BUILD_ARCH" \
         --components=main \
+        --keep-sbuild-chroot-dir \
         --make-sbuild-tarball="$SBUILD_TARBALL" \
         "$CODENAME" "$tmpdir" http://deb.debian.org/debian
-    rm -rf "$tmpdir"
+
+    cleanup_tmpdir
+    tmpdir=
     trap - EXIT
 fi
 
