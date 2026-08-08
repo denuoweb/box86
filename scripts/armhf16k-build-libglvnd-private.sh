@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+trap 'rc=$?; echo "ERROR: ${BASH_SOURCE[0]}:${LINENO}: command failed (rc=$rc): $BASH_COMMAND" >&2; exit $rc' ERR
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 HOST_ARCH=${HOST_ARCH:-armhf}
@@ -21,7 +22,7 @@ mkdir -p "$WORK/fetch" "$OUT"
     cd "$WORK/fetch"
     apt-get --download-only --only-source source libglvnd
 )
-DSC=$(find "$WORK/fetch" -maxdepth 1 -type f -name 'libglvnd_*.dsc' -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)
+DSC=$(find "$WORK/fetch" -maxdepth 1 -type f -name 'libglvnd_*.dsc' -print -quit)
 [[ -n "$DSC" && -f "$DSC" ]] || { echo "libglvnd .dsc was not downloaded" >&2; exit 3; }
 dpkg-source -x "$DSC" "$WORK/src"
 
