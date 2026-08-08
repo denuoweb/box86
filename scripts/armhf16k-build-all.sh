@@ -29,7 +29,7 @@ while IFS=$'\t' read -r stage source targets; do
     echo "============================================================"
 
     case "$source" in
-        zlib|libbsd|libxau|libxdmcp|libxcb|libxi|libasyncns|libogg)
+        zlib|libbsd|libxau|libxdmcp|libxcb|libxi|libasyncns|libogg|lame)
             bash "$ROOT/scripts/armhf16k-rebuild-source.sh" "$source"
             ;;
         mesa-pi5-private)
@@ -52,5 +52,4 @@ while IFS=$'\t' read -r stage source targets; do
     fi
 done < "$MANIFEST"
 
-# Keep the package pool index useful for the low-level Debian rebuilds.
 bash "$ROOT/scripts/armhf16k-make-repo.sh"
