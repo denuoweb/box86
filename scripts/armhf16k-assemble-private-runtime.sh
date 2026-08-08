@@ -7,13 +7,13 @@ MESA_ROOT=${ARMHF16K_MESA_ROOT:-"$ROOT/armhf16k/private/mesa-root"}
 GLVND_ROOT=${ARMHF16K_GLVND_ROOT:-"$ROOT/armhf16k/private/glvnd-root"}
 WORK=${ARMHF16K_RUNTIME_WORK:-"$ROOT/armhf16k/work/private-runtime"}
 DIST=${DISTDIR:-"$ROOT/dist"}
-VERSION=${ARMHF16K_RUNTIME_VERSION:-1.0+16k3}
+VERSION=${ARMHF16K_RUNTIME_VERSION:-1.0+16k4}
 PREFIX=/usr/lib/box86-16k/native16k
 PKGROOT="$WORK/pkg"
 NATIVE="$PKGROOT$PREFIX"
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing tool: $1" >&2; exit 2; }; }
-for x in dpkg-deb python3 readelf readlink; do need "$x"; done
+for x in dpkg-deb python3 readelf; do need "$x"; done
 [[ -d "$MESA_ROOT/usr/lib/arm-linux-gnueabihf" ]] || { echo "Missing Mesa staging root. Build mesa-pi5-private first." >&2; exit 3; }
 [[ -d "$GLVND_ROOT/usr/lib/arm-linux-gnueabihf" ]] || { echo "Missing GLVND staging root. Build libglvnd-private first." >&2; exit 3; }
 
@@ -26,14 +26,15 @@ copy_lib_tree() {
     cp -a "$src"/. "$NATIVE"/
 }
 
-# Pull the previously validated low-level libraries out of their .debs rather
-# than replacing Debian's system copies. Include all runtime libxcb packages
-# produced by the source build, plus zlib/libbsd/libXau.
+# Pull the validated low-level libraries out of their .debs rather than
+# replacing Debian's system copies. Include all runtime libxcb packages plus
+# zlib, libbsd, libXau and libXdmcp.
 TMP="$WORK/extract"
 mkdir -p "$TMP"
 found_zlib=0
 found_bsd=0
 found_xau=0
+found_xdmcp=0
 found_xcb=0
 for deb in "$POOL"/*.deb; do
     [ -f "$deb" ] || continue
@@ -42,6 +43,7 @@ for deb in "$POOL"/*.deb; do
         zlib1g) found_zlib=1 ;;
         libbsd0) found_bsd=1 ;;
         libxau6) found_xau=1 ;;
+        libxdmcp6) found_xdmcp=1 ;;
         libxcb*-dev|*-dbgsym) continue ;;
         libxcb*) found_xcb=1 ;;
         *) continue ;;
@@ -53,9 +55,9 @@ for deb in "$POOL"/*.deb; do
     copy_lib_tree "$dir/usr/lib/arm-linux-gnueabihf"
 done
 
-[[ $found_zlib -eq 1 && $found_bsd -eq 1 && $found_xau -eq 1 && $found_xcb -eq 1 ]] || {
-    echo "Low-level package pool is incomplete (zlib=$found_zlib bsd=$found_bsd xau=$found_xau xcb=$found_xcb)." >&2
-    echo "Build stages zlib, libbsd, libxau and libxcb first." >&2
+[[ $found_zlib -eq 1 && $found_bsd -eq 1 && $found_xau -eq 1 && $found_xdmcp -eq 1 && $found_xcb -eq 1 ]] || {
+    echo "Low-level package pool is incomplete (zlib=$found_zlib bsd=$found_bsd xau=$found_xau xdmcp=$found_xdmcp xcb=$found_xcb)." >&2
+    echo "Build stages zlib, libbsd, libxau, libxdmcp and libxcb first." >&2
     exit 4
 }
 
@@ -96,8 +98,9 @@ while IFS= read -r -d '' file; do
     fi
 done < <(find "$NATIVE" -type f -print0)
 
-# Sanity-check the hard dependencies that originally stopped steamui.so.
-for soname in libGL.so.1 libGLX.so.0 libEGL.so.1 libxcb.so.1 libXau.so.6 libz.so.1; do
+# Sanity-check the hard dependencies that originally stopped steamui.so and
+# the direct native-loader closure discovered during validation.
+for soname in libGL.so.1 libGLX.so.0 libEGL.so.1 libxcb.so.1 libXau.so.6 libXdmcp.so.6 libz.so.1; do
     find "$NATIVE" -maxdepth 1 \( -type f -o -type l \) -name "$soname" -print -quit | grep -q . || {
         echo "Private runtime is missing $soname" >&2
         exit 5
