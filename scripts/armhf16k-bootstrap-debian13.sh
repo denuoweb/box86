@@ -58,6 +58,9 @@ if ! source_resolves zlib; then
     echo "Using Debian archive keyring: $DEBIAN_KEYRING"
     tmp=$(mktemp)
     cat >"$tmp" <<EOF
+types: deb-src
+EOF
+    cat >"$tmp" <<EOF
 Types: deb-src
 URIs: http://deb.debian.org/debian
 Suites: ${CODENAME} ${CODENAME}-updates
@@ -141,10 +144,24 @@ if ! proot_base_valid; then
         --components=main \
         "$CODENAME" "$tmpdir" http://deb.debian.org/debian
 
-    # PRoot's -q mode inserts the host qemu-arm command in front of every guest
-    # execution, so debootstrap's second stage never depends on kernel
-    # binfmt_misc or direct loading of the stock ARMHF binaries.
-    $SUDO proot \
+    # Separate QEMU from PRoot before combining them. If either of these fails,
+    # the host qemu-arm linux-user path itself cannot execute the extracted
+    # ARMHF base and PRoot is not the relevant fault domain.
+    if ! qemu-arm -L "$tmpdir" "$tmpdir/bin/true"; then
+        echo "Direct qemu-arm smoke test failed for ARMHF /bin/true" >&2
+        exit 5
+    fi
+    if ! qemu-arm -L "$tmpdir" "$tmpdir/bin/sh" -c 'exit 0'; then
+        echo "Direct qemu-arm smoke test failed for ARMHF /bin/sh" >&2
+        exit 5
+    fi
+    echo "Verified direct qemu-arm execution of extracted ARMHF base"
+
+    # PRoot's -q mode inserts qemu-arm in front of guest execution and handles
+    # path translation. Disable PRoot's seccomp acceleration for this path:
+    # ptrace/seccomp acceleration can conflict with emulated guest execution on
+    # some kernels. This is build-time scaffolding only.
+    $SUDO env PROOT_NO_SECCOMP=1 proot \
         -S "$tmpdir" \
         -q qemu-arm \
         -w / \
@@ -159,7 +176,7 @@ deb http://deb.debian.org/debian-security ${CODENAME}-security main
 deb-src http://deb.debian.org/debian-security ${CODENAME}-security main
 EOF
 
-    arch=$($SUDO proot -S "$tmpdir" -q qemu-arm /usr/bin/dpkg --print-architecture)
+    arch=$($SUDO env PROOT_NO_SECCOMP=1 proot -S "$tmpdir" -q qemu-arm /usr/bin/dpkg --print-architecture)
     if [[ "$arch" != "$HOST_ARCH" ]]; then
         echo "PRoot base reported architecture '$arch', expected '$HOST_ARCH'" >&2
         exit 5
