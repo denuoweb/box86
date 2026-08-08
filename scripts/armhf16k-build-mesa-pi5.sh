@@ -26,7 +26,7 @@ $SUDO apt-get install -y --no-install-recommends \
     libxcb-glx0-dev:${HOST_ARCH} libxcb-present-dev:${HOST_ARCH} libxcb-randr0-dev:${HOST_ARCH} \
     libxcb-shm0-dev:${HOST_ARCH} libxcb-xfixes0-dev:${HOST_ARCH} \
     libxshmfence-dev:${HOST_ARCH} libxxf86vm-dev:${HOST_ARCH} \
-    libwayland-dev:${HOST_ARCH} wayland-protocols \
+    libwayland-dev:${HOST_ARCH} libwayland-egl-backend-dev:${HOST_ARCH} wayland-protocols \
     libzstd-dev:${HOST_ARCH} zlib1g-dev:${HOST_ARCH} \
     libudev-dev:${HOST_ARCH} libglvnd-dev:${HOST_ARCH}
 
