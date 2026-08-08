@@ -3,15 +3,48 @@ set -euo pipefail
 
 HOST_ARCH=${HOST_ARCH:-armhf}
 SUDO=${SUDO:-sudo}
+DEBIAN_SRC_FILE=${DEBIAN_SRC_FILE:-/etc/apt/sources.list.d/armhf16k-debian-src.sources}
 
 if ! command -v apt-get >/dev/null 2>&1; then
     echo "This bootstrap targets Debian/apt systems." >&2
     exit 2
 fi
 
+if [[ -r /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+fi
+CODENAME=${VERSION_CODENAME:-trixie}
+if [[ "$CODENAME" != "trixie" ]]; then
+    echo "Warning: expected Debian 13/trixie, detected codename '$CODENAME'." >&2
+fi
+
 if ! dpkg --print-foreign-architectures | grep -qx "$HOST_ARCH"; then
     echo "Adding foreign architecture: $HOST_ARCH"
     $SUDO dpkg --add-architecture "$HOST_ARCH"
+fi
+
+# Debian source metadata is separate from binary package metadata. Modern
+# Debian uses deb822 .sources files; install a source-only companion rather
+# than modifying the user's existing binary repository configuration.
+if ! apt-cache showsrc --only-source zlib 2>/dev/null | grep -q '^Package: zlib$'; then
+    echo "Enabling Debian source repositories in $DEBIAN_SRC_FILE"
+    tmp=$(mktemp)
+    cat >"$tmp" <<EOF
+Types: deb-src
+URIs: http://deb.debian.org/debian
+Suites: ${CODENAME} ${CODENAME}-updates
+Components: main contrib non-free non-free-firmware
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+
+Types: deb-src
+URIs: http://deb.debian.org/debian-security
+Suites: ${CODENAME}-security
+Components: main contrib non-free non-free-firmware
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+EOF
+    $SUDO install -Dm644 "$tmp" "$DEBIAN_SRC_FILE"
+    rm -f "$tmp"
 fi
 
 $SUDO apt-get update
@@ -28,13 +61,19 @@ $SUDO apt-get install -y --no-install-recommends \
     gzip \
     apt-utils
 
-if ! apt-cache showsrc zlib >/dev/null 2>&1; then
-    cat >&2 <<'MSG'
-No deb-src entries are enabled. The ARMHF16K rebuilder uses Debian source
-packages, so enable source repositories matching your Debian 13 binary
-repositories, run `sudo apt-get update`, and rerun this script.
+# apt-cache can exit zero with no matching record, so validate output rather
+# than exit status. --only-source prevents binary-to-source name fallback.
+if ! apt-cache showsrc --only-source zlib 2>/dev/null | grep -q '^Package: zlib$'; then
+    cat >&2 <<MSG
+Debian source metadata is still unavailable after apt-get update.
+Expected a source record for zlib from:
+  $DEBIAN_SRC_FILE
+Inspect it with:
+  cat $DEBIAN_SRC_FILE
+  apt-cache showsrc --only-source zlib
 MSG
     exit 3
 fi
 
+echo "Verified Debian source metadata: zlib"
 echo "ARMHF16K build prerequisites are installed."
