@@ -16,7 +16,7 @@ if [[ -z "$SOURCE" ]]; then
 fi
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing tool: $1" >&2; exit 2; }; }
-for x in apt-get apt-cache dpkg dpkg-source dpkg-buildpackage dpkg-parsechangelog dch python3 readelf; do
+for x in apt-get dpkg dpkg-source dpkg-buildpackage dpkg-parsechangelog dch python3 readelf; do
     need "$x"
 done
 
@@ -25,10 +25,11 @@ if ! dpkg --print-foreign-architectures | grep -qx "$HOST_ARCH" && [[ "$(dpkg --
     exit 3
 fi
 
-# apt-cache returns success for normal operation even when no source record
-# matched. Options must precede showsrc, so require an exact source record.
-if ! apt-cache --only-source showsrc "$SOURCE" 2>/dev/null | grep -Fqx "Package: $SOURCE"; then
-    echo "APT has no source record for '$SOURCE'. Run: bash scripts/armhf16k-bootstrap-debian13.sh" >&2
+# Resolve through apt-get's source command itself instead of inferring source
+# availability from apt-cache. --print-uris performs resolution without a
+# download and fails if the source package cannot be selected.
+if ! apt-get --print-uris --only-source source "$SOURCE" >/dev/null 2>&1; then
+    echo "APT cannot resolve source package '$SOURCE'. Run: bash scripts/armhf16k-bootstrap-debian13.sh" >&2
     exit 3
 fi
 
