@@ -7,7 +7,7 @@ MESA_ROOT=${ARMHF16K_MESA_ROOT:-"$ROOT/armhf16k/private/mesa-root"}
 GLVND_ROOT=${ARMHF16K_GLVND_ROOT:-"$ROOT/armhf16k/private/glvnd-root"}
 WORK=${ARMHF16K_RUNTIME_WORK:-"$ROOT/armhf16k/work/private-runtime"}
 DIST=${DISTDIR:-"$ROOT/dist"}
-VERSION=${ARMHF16K_RUNTIME_VERSION:-1.0+16k6}
+VERSION=${ARMHF16K_RUNTIME_VERSION:-1.0+16k7}
 PREFIX=/usr/lib/box86-16k/native16k
 PKGROOT="$WORK/pkg"
 NATIVE="$PKGROOT$PREFIX"
@@ -26,9 +26,6 @@ copy_lib_tree() {
     cp -a "$src"/. "$NATIVE"/
 }
 
-# Pull the validated low-level libraries out of their .debs rather than
-# replacing Debian's system copies. Include all runtime libxcb packages plus
-# the native dependencies encountered by Steam/Box86 on the 16K host.
 TMP="$WORK/extract"
 mkdir -p "$TMP"
 found_zlib=0
@@ -39,6 +36,7 @@ found_xcb=0
 found_xi=0
 found_asyncns=0
 found_ogg=0
+found_mp3lame=0
 for deb in "$POOL"/*.deb; do
     [ -f "$deb" ] || continue
     pkg=$(dpkg-deb -f "$deb" Package)
@@ -50,6 +48,7 @@ for deb in "$POOL"/*.deb; do
         libxi6) found_xi=1 ;;
         libasyncns0) found_asyncns=1 ;;
         libogg0) found_ogg=1 ;;
+        libmp3lame0) found_mp3lame=1 ;;
         libxcb*-dev|*-dbgsym) continue ;;
         libxcb*) found_xcb=1 ;;
         *) continue ;;
@@ -61,14 +60,12 @@ for deb in "$POOL"/*.deb; do
     copy_lib_tree "$dir/usr/lib/arm-linux-gnueabihf"
 done
 
-[[ $found_zlib -eq 1 && $found_bsd -eq 1 && $found_xau -eq 1 && $found_xdmcp -eq 1 && $found_xcb -eq 1 && $found_xi -eq 1 && $found_asyncns -eq 1 && $found_ogg -eq 1 ]] || {
-    echo "Low-level package pool is incomplete (zlib=$found_zlib bsd=$found_bsd xau=$found_xau xdmcp=$found_xdmcp xcb=$found_xcb xi=$found_xi asyncns=$found_asyncns ogg=$found_ogg)." >&2
-    echo "Build stages zlib, libbsd, libxau, libxdmcp, libxcb, libxi, libasyncns and libogg first." >&2
+[[ $found_zlib -eq 1 && $found_bsd -eq 1 && $found_xau -eq 1 && $found_xdmcp -eq 1 && $found_xcb -eq 1 && $found_xi -eq 1 && $found_asyncns -eq 1 && $found_ogg -eq 1 && $found_mp3lame -eq 1 ]] || {
+    echo "Low-level package pool is incomplete (zlib=$found_zlib bsd=$found_bsd xau=$found_xau xdmcp=$found_xdmcp xcb=$found_xcb xi=$found_xi asyncns=$found_asyncns ogg=$found_ogg mp3lame=$found_mp3lame)." >&2
+    echo "Build the low-level manifest stages through lame first." >&2
     exit 4
 }
 
-# Overlay Pi5-specific Mesa, then GLVND. GLVND owns the public libGL/libGLX/
-# libEGL entry points; Mesa provides the vendor and hardware-driver libraries.
 copy_lib_tree "$MESA_ROOT/usr/lib/arm-linux-gnueabihf"
 copy_lib_tree "$GLVND_ROOT/usr/lib/arm-linux-gnueabihf"
 
@@ -92,9 +89,6 @@ EOF
 
 python3 "$ROOT/scripts/armhf16k-verify-tree.py" --page-size 16384 "$NATIVE"
 
-# The point of the Pi5-specific Mesa build is to delete the generic LLVM/libelf
-# closure, not merely hide it. Reject either dependency anywhere in the private
-# runtime before packaging.
 while IFS= read -r -d '' file; do
     needed=$(readelf -dW "$file" 2>/dev/null || true)
     if printf '%s\n' "$needed" | grep -Eq 'Shared library: \[(libLLVM[^]]*|libelf\.so[^]]*)\]'; then
@@ -104,18 +98,13 @@ while IFS= read -r -d '' file; do
     fi
 done < <(find "$NATIVE" -type f -print0)
 
-# Sanity-check the hard dependencies that have stopped Steam/steamui.so during
-# real 16K-host validation.
-for soname in libGL.so.1 libGLX.so.0 libEGL.so.1 libxcb.so.1 libXau.so.6 libXdmcp.so.6 libXi.so.6 libasyncns.so.0 libogg.so.0 libz.so.1; do
+for soname in libGL.so.1 libGLX.so.0 libEGL.so.1 libxcb.so.1 libXau.so.6 libXdmcp.so.6 libXi.so.6 libasyncns.so.0 libogg.so.0 libmp3lame.so.0 libz.so.1; do
     find "$NATIVE" -maxdepth 1 \( -type f -o -type l \) -name "$soname" -print -quit | grep -q . || {
         echo "Private runtime is missing $soname" >&2
         exit 5
     }
 done
 
-# Mesa's dril target creates these as symlinks to libdril_dri.so. Steam's X/GLX
-# path on Pi5 has been observed requesting vc4_dri.so, while V3D is the render
-# driver, so require both aliases and ensure they resolve inside this runtime.
 for driver in "$NATIVE/dri/v3d_dri.so" "$NATIVE/dri/vc4_dri.so"; do
     [[ -e "$driver" || -L "$driver" ]] || {
         echo "Private Mesa runtime is missing Pi DRI driver: $driver" >&2
