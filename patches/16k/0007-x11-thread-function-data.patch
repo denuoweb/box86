@@ -11,14 +11,14 @@ read each native callback slot, create an x86 bridge for the native function,
 and publish the bridge address through the shadow variable. Refresh the
 shadows both for guest XInitThreads calls and for BOX86_X11THREADS startup.
 ---
- src/wrapped/wrappedlibx11.c         | 50 ++++++++++++++++++++++++++++++++++++++++++++++++--
+ src/wrapped/wrappedlibx11.c         | 52 ++++++++++++++++++++++++++++++++++++++++++++++++----
  src/wrapped/wrappedlibx11_private.h | 16 ++++++++--------
- 2 files changed, 56 insertions(+), 10 deletions(-)
+ 2 files changed, 56 insertions(+), 12 deletions(-)
 
 diff --git a/src/wrapped/wrappedlibx11.c b/src/wrapped/wrappedlibx11.c
 --- a/src/wrapped/wrappedlibx11.c
 +++ b/src/wrapped/wrappedlibx11.c
-@@ -89,5 +89,42 @@ typedef uintptr_t (*LFpii_t)(void*, int32_t, int32_t);
+@@ -89,5 +89,40 @@ typedef uintptr_t (*LFpii_t)(void*, int32_t, int32_t);
  typedef int32_t (*iFpiiL_t)(void*, int32_t, int32_t, uintptr_t);
  typedef void* (*pFpiiuu_t)(void*, int32_t, int32_t, uint32_t, uint32_t);
  
@@ -59,9 +59,9 @@ diff --git a/src/wrapped/wrappedlibx11.c b/src/wrapped/wrappedlibx11.c
 +    }
 +}
 +
- #define ADDED_FUNCTIONS()   \
-     GO(XInitThreads, uFv_t) \
-@@ -96,4 +133,13 @@ typedef void* (*pFpiiuu_t)(void*, int32_t, int32_t, uint32_t, uint32_t);
+-#define ADDED_FUNCTIONS()   \
+-    GO(XInitThreads, uFv_t) \
+@@ -96,4 +131,13 @@ typedef void* (*pFpiiuu_t)(void*, int32_t, int32_t, uint32_t, uint32_t);
  
  #include "wrappercallback.h"
  
@@ -75,7 +75,7 @@ diff --git a/src/wrapped/wrappedlibx11.c b/src/wrapped/wrappedlibx11.c
 +}
 +
  #define SUPER() \
-@@ -1603,11 +1649,13 @@ EXPORT void my_XFreeEventData(x86emu_t* emu, void* dpy, my_XGenericEventCookie_
+@@ -1603,11 +1647,13 @@ EXPORT void my_XFreeEventData(x86emu_t* emu, void* dpy, my_XGenericEventCookie_
      #define CUSTOM_INIT                 \
          getMy(lib);                     \
          setNeededLibs(lib, 1, "libdl.so"); \
