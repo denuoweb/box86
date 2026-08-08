@@ -50,7 +50,7 @@ index a8cdfd1..16c0004 100644
  
  typedef struct blocklist_s {
      void*               block;
-@@ -1045,11 +1046,52 @@ int getMmapped(uintptr_t addr)
+@@ -1045,7 +1046,41 @@ int getMmapped(uintptr_t addr)
      return rb_get(mmapmem, addr);
  }
  
@@ -124,7 +124,7 @@ index 86833cb..16c0004 100644
  GOM(makecontext, iFEppiV)   //%%
  // mallinfo
  GOWS(mallinfo, pFEp)        //%%
-@@ -1305,7 +1306,9 @@ GO(popen, pFpp)
+@@ -1305,8 +1306,8 @@ GO(popen, pFpp)
  GO(posix_fadvise, iFiuui)
  GO(posix_fadvise64, iFiuui)
  GO(posix_fallocate, iFiii)
@@ -146,7 +146,7 @@ index 5e33bf5..16c0004 100644
  void* ElfSetBrk(void* newbrk);
  int my_vfork(x86emu_t* emu);
  
-@@ -706,6 +707,11 @@ void EXPORT x86Syscall(x86emu_t *emu)
+@@ -706,5 +707,10 @@ void EXPORT x86Syscall(x86emu_t *emu)
              S_EAX = (intptr_t)my_mmap64(emu, (void*)R_EBX, (unsigned long)R_ECX, R_EDX, R_ESI, R_EDI, R_EBP);
              break;
 +        case 219:   // madvise
@@ -157,7 +157,7 @@ index 5e33bf5..16c0004 100644
          case 195:   // stat64
              {
                  struct stat64 st;
-@@ -908,6 +914,8 @@ intptr_t my_syscall(x86emu_t* emu, int s, void* args)
+@@ -908,8 +914,10 @@ intptr_t my_syscall(x86emu_t* emu, int s, void* args)
              return my_mprotect(emu, p(4), u32(8), i32(12));
          case 174:   // sys_rt_sigaction
              return my_syscall_sigaction(emu, i32(4), p(8), p(12), i32(16));
@@ -172,7 +172,7 @@ diff --git a/src/wrapped/wrappedlibc.c b/src/wrapped/wrappedlibc.c
 index fa6dc2e..16c0004 100644
 --- a/src/wrapped/wrappedlibc.c
 +++ b/src/wrapped/wrappedlibc.c
-@@ -3161,8 +3161,12 @@ EXPORT void* my_mmap(x86emu_t* emu, void *addr, unsigned long length, int prot, i
+@@ -3161,8 +3161,13 @@ EXPORT void* my_mmap(x86emu_t* emu, void *addr, unsigned long length, int prot, i
          }
          if(emu)
              setProtection_mmap((uintptr_t)ret, length, prot);
@@ -187,7 +187,7 @@ index fa6dc2e..16c0004 100644
      }
      return ret;
  }
-@@ -3222,8 +3226,12 @@ EXPORT void* my_mmap64(x86emu_t* emu, void *addr, unsigned long length, int prot,
+@@ -3222,8 +3226,13 @@ EXPORT void* my_mmap64(x86emu_t* emu, void *addr, unsigned long length, int prot,
          }
          if(emu)
              setProtection_mmap((uintptr_t)ret, length, prot);
@@ -210,12 +210,6 @@ index fa6dc2e..16c0004 100644
      if(ret==old_addr) {
          if(old_size && old_size<new_size) {
              setProtection_mmap((uintptr_t)ret+old_size, new_size-old_size, prot);
-+            clearFileMapped((uintptr_t)ret+old_size, new_size-old_size);
-+            if(file_mapped)
-+                setFileMapped((uintptr_t)ret+old_size, new_size-old_size);
-             #ifdef DYNAREC
-             if(box86_dynarec)
-                 addDBFromAddressRange((uintptr_t)ret+old_size, new_size-old_size);
 @@ -3244,6 +3253,7 @@ EXPORT void* my_mremap(x86emu_t* emu, void* old_addr, size_t old_size, size_t ne
              #endif
          } else if(old_size && new_size<old_size) {
@@ -252,7 +246,7 @@ index fa6dc2e..16c0004 100644
          #ifdef DYNAREC
          if(box86_dynarec)
              addDBFromAddressRange((uintptr_t)ret, new_size);
-@@ -3286,8 +3303,10 @@ EXPORT int my_munmap(x86emu_t* emu, void* addr, unsigned long length)
+@@ -3286,7 +3303,9 @@ EXPORT int my_munmap(x86emu_t* emu, void* addr, unsigned long length)
      #endif
      int ret = munmap(addr, length);
 -    if(!ret && length)
@@ -263,7 +257,7 @@ index fa6dc2e..16c0004 100644
      return ret;
  }
  
-@@ -3383,6 +3402,67 @@ EXPORT int my_mprotect(x86emu_t* emu, void *addr, unsigned long len, int prot)
+@@ -3383,6 +3402,79 @@ EXPORT int my_mprotect(x86emu_t* emu, void *addr, unsigned long len, int prot)
  
      return box86_host_mprotect(host_start, host_end - host_start, prot);
  }
