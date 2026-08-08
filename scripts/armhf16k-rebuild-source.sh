@@ -116,8 +116,8 @@ if marker not in text:
 PY
 
 # Each package gets a disposable ARMHF filesystem. PRoot owns binfmt behavior
-# in userspace and inserts qemu-arm for every guest exec, so stock 4K-linked
-# ARMHF build tools never go through the 16K host kernel's native ELF loader.
+# in userspace and inserts the host qemu-arm command for every guest exec, so
+# stock 4K-linked ARMHF build tools never go through the 16K host ELF loader.
 echo "Extracting disposable ARMHF PRoot environment"
 tar --no-same-owner -xzf "$PROOT_BASE" -C "$GUEST"
 mkdir -p "$GUEST/etc/apt/sources.list.d"
@@ -128,7 +128,7 @@ EOF
 proot_guest() {
     proot \
         -S "$GUEST" \
-        -q /usr/bin/qemu-arm \
+        -q qemu-arm \
         -b "$WORK:/work" \
         -b "$REPO:/armhf16k-repo" \
         -w /work \
