@@ -13,9 +13,9 @@ DEBIAN_SECURITY_VERSION=${ARMHF16K_MESA_DEBIAN_SECURITY_VERSION:-25.0.7-2+deb13u
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing tool: $1" >&2; exit 2; }; }
 for x in apt-cache apt-get curl dget dpkg dpkg-source meson ninja patch readelf python3; do need "$x"; done
 
-# Only install the development surface needed by Raspberry Pi V3D/V3DV. Do not
-# install LLVM or libelf development packages: they are not part of the Pi5
-# hardware-driver closure we are building.
+# Only install the development surface needed by Raspberry Pi V3D/V3DV and the
+# VC4 DRI target used by X/GLX on Raspberry Pi display DRM nodes. Do not install
+# LLVM or libelf development packages.
 $SUDO apt-get install -y --no-install-recommends \
     meson ninja-build pkg-config python3-mako python3-yaml python3-packaging python3-ply \
     bison flex patch \
@@ -104,17 +104,16 @@ echo "Verified Debian Trixie Mesa CVE-2026-40393 security delta in Raspberry Pi 
 CROSS="$WORK/armhf.ini"
 bash "$ROOT/scripts/armhf16k-meson-cross-file.sh" "$CROSS" >/dev/null
 
-# Raspberry Pi 5 hardware uses the V3D Gallium and Broadcom V3DV paths. Build
-# only that hardware closure; LLVMpipe and unrelated GPU drivers are omitted.
-# xlib-lease only enables VK_EXT_acquire_xlib_display. Disable it so the private
-# runtime keeps the required xcb-randr Vulkan path without adding libXrandr to
-# the ARMHF closure.
+# V3D is the Pi4/Pi5 render driver. X/GLX can identify the display DRM node as
+# vc4 and therefore asks Mesa for vc4_dri.so; Mesa only creates that DRI target
+# when Gallium vc4 is enabled. Build both targets while keeping LLVM disabled.
+# xlib-lease only enables VK_EXT_acquire_xlib_display and remains unnecessary.
 meson setup "$WORK/build" "$WORK/src" \
     --cross-file "$CROSS" \
     --prefix=/usr \
     --libdir=lib/arm-linux-gnueabihf \
     --buildtype=release \
-    -Dgallium-drivers=v3d \
+    -Dgallium-drivers=v3d,vc4 \
     -Dvulkan-drivers=broadcom \
     -Dxlib-lease=disabled \
     -Dllvm=disabled \
@@ -143,5 +142,10 @@ for so in "${GALLIUM[@]}"; do
     fi
 done
 
-echo "PASS: Pi5 Mesa is 16K-compatible, security-patched, and has no libLLVM/libelf dependency"
+for driver in v3d_dri.so vc4_dri.so; do
+    path="$OUT/usr/lib/arm-linux-gnueabihf/dri/$driver"
+    [[ -e "$path" || -L "$path" ]] || { echo "Mesa build did not install required Pi DRI target: $driver" >&2; exit 6; }
+done
+
+echo "PASS: Pi5 Mesa V3D/VC4 is 16K-compatible, security-patched, and has no libLLVM/libelf dependency"
 echo "Mesa staging root: $OUT"
