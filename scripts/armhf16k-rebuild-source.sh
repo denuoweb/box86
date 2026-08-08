@@ -19,9 +19,9 @@ if [[ -z "$SOURCE" ]]; then
 fi
 
 case "$SOURCE" in
-    zlib|libbsd|libxau|libxcb) ;;
+    zlib|libbsd|libxau|libxdmcp|libxcb) ;;
     *)
-        echo "Generic cross-rebuilder is limited to the validated low-level set: zlib, libbsd, libxau, libxcb" >&2
+        echo "Generic cross-rebuilder is limited to the validated low-level set: zlib, libbsd, libxau, libxdmcp, libxcb" >&2
         exit 2
         ;;
 esac
