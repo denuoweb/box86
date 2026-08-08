@@ -56,7 +56,7 @@ fi
 # than modifying the user's existing binary repository configuration.
 # Always rewrite our companion file before apt-get update so a previously
 # generated entry with a mismatched Signed-By value can repair itself.
-if ! apt-cache showsrc --only-source zlib 2>/dev/null | grep -q '^Package: zlib$'; then
+if ! apt-cache --only-source showsrc zlib 2>/dev/null | grep -q '^Package: zlib$'; then
     echo "Enabling Debian source repositories in $DEBIAN_SRC_FILE"
     echo "Using Debian archive keyring: $DEBIAN_KEYRING"
     tmp=$(mktemp)
@@ -91,16 +91,17 @@ $SUDO apt-get install -y --no-install-recommends \
     gzip \
     apt-utils
 
-# apt-cache can exit zero with no matching record, so validate output rather
-# than exit status. --only-source prevents binary-to-source name fallback.
-if ! apt-cache showsrc --only-source zlib 2>/dev/null | grep -q '^Package: zlib$'; then
+# apt-cache returns success for normal operation even if no matching source
+# record was printed, so validate output. Options must precede the showsrc
+# command; --only-source restricts matching to source package names.
+if ! apt-cache --only-source showsrc zlib 2>/dev/null | grep -q '^Package: zlib$'; then
     cat >&2 <<MSG
 Debian source metadata is still unavailable after apt-get update.
 Expected a source record for zlib from:
   $DEBIAN_SRC_FILE
 Inspect it with:
   cat $DEBIAN_SRC_FILE
-  apt-cache showsrc --only-source zlib
+  apt-cache --only-source showsrc zlib
 MSG
     exit 3
 fi
