@@ -2,11 +2,10 @@
 set -euo pipefail
 
 HOST_ARCH=${HOST_ARCH:-armhf}
-BUILD_ARCH=${BUILD_ARCH:-$(dpkg --print-architecture)}
+BUILD_ARCH=${BUILD_ARCH:-$HOST_ARCH}
 SUDO=${SUDO:-sudo}
 DEBIAN_SRC_FILE=${DEBIAN_SRC_FILE:-/etc/apt/sources.list.d/armhf16k-debian-src.sources}
 DEBIAN_KEYRING=${DEBIAN_KEYRING:-}
-SBUILD_TARBALL=${ARMHF16K_SBUILD_TARBALL:-"$HOME/.cache/sbuild/trixie-${BUILD_ARCH}.tar.gz"}
 
 if ! command -v apt-get >/dev/null 2>&1; then
     echo "This bootstrap targets Debian/apt systems." >&2
@@ -23,7 +22,7 @@ if [[ "$CODENAME" != "trixie" ]]; then
     echo "Warning: expected Debian 13/trixie, detected codename '$CODENAME'." >&2
 fi
 
-if ! dpkg --print-foreign-architectures | grep -qx "$HOST_ARCH"; then
+if ! dpkg --print-foreign-architectures | grep -qx "$HOST_ARCH" && [[ "$(dpkg --print-architecture)" != "$HOST_ARCH" ]]; then
     echo "Adding foreign architecture: $HOST_ARCH"
     $SUDO dpkg --add-architecture "$HOST_ARCH"
 fi
@@ -60,9 +59,6 @@ if [[ ! -r "$DEBIAN_KEYRING" ]]; then
     exit 3
 fi
 
-# Debian source metadata is separate from binary package metadata. Modern
-# Debian uses deb822 .sources files; install a source-only companion rather
-# than modifying the user's existing binary repository configuration.
 if ! source_resolves zlib; then
     echo "Enabling Debian source repositories in $DEBIAN_SRC_FILE"
     echo "Using Debian archive keyring: $DEBIAN_KEYRING"
@@ -97,7 +93,8 @@ $SUDO apt-get install -y --no-install-recommends \
     sbuild \
     debootstrap \
     mmdebstrap \
-    uidmap
+    uidmap \
+    arch-test
 
 if ! source_resolves zlib; then
     cat >&2 <<MSG
@@ -113,21 +110,33 @@ fi
 
 echo "Verified Debian source resolution: zlib"
 
-# Keep all ARMHF build dependencies out of the normal host package database.
-# sbuild's unshare backend uses an ephemeral clean root and does not require
-# sudo for package builds. User namespaces are required by that backend.
 if ! unshare -Ur true >/dev/null 2>&1; then
     cat >&2 <<'MSG'
-Unprivileged user namespaces are unavailable, but ARMHF16K now uses sbuild's
-unshare backend to isolate cross-build dependencies from the host system.
+Unprivileged user namespaces are unavailable, but ARMHF16K uses sbuild's
+unshare backend to isolate build dependencies from the host system.
 Enable them and rerun bootstrap, for example:
   sudo sysctl -w kernel.unprivileged_userns_clone=1
 MSG
     exit 4
 fi
 
+# Prefer a native ARMHF build root over arm64->armhf cross-building. Debian's
+# cross dependency graph is not fully satisfiable for packages such as
+# elfutils, while this Raspberry Pi kernel/CPU can execute ARMHF directly.
+if ! arch-test "$BUILD_ARCH" >/dev/null 2>&1; then
+    cat >&2 <<MSG
+The current machine/kernel cannot execute Debian $BUILD_ARCH binaries natively.
+ARMHF16K intentionally uses a native $BUILD_ARCH sbuild root to avoid Debian
+cross-build dependency limitations. Check with:
+  arch-test $BUILD_ARCH
+MSG
+    exit 5
+fi
+
+echo "Verified native execution support: $BUILD_ARCH"
+
 if [[ ! -f "$SBUILD_TARBALL" ]]; then
-    echo "Creating isolated sbuild base: $SBUILD_TARBALL"
+    echo "Creating isolated native $BUILD_ARCH sbuild base: $SBUILD_TARBALL"
     mkdir -p "$(dirname "$SBUILD_TARBALL")"
     tmpdir=$(mktemp -d)
     trap 'rm -rf "$tmpdir"' EXIT
@@ -141,7 +150,7 @@ if [[ ! -f "$SBUILD_TARBALL" ]]; then
     trap - EXIT
 fi
 
-[[ -r "$SBUILD_TARBALL" ]] || { echo "sbuild tarball was not created: $SBUILD_TARBALL" >&2; exit 5; }
+[[ -r "$SBUILD_TARBALL" ]] || { echo "sbuild tarball was not created: $SBUILD_TARBALL" >&2; exit 6; }
 
-echo "Verified isolated sbuild base: $SBUILD_TARBALL"
+echo "Verified isolated native sbuild base: $SBUILD_TARBALL"
 echo "ARMHF16K build prerequisites are installed."
