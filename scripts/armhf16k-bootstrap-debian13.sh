@@ -109,7 +109,7 @@ command -v qemu-arm >/dev/null 2>&1 || { echo "qemu-arm is unavailable" >&2; exi
 proot_base_valid() {
     [[ -r "$PROOT_BASE" ]] || return 1
     tar -tzf "$PROOT_BASE" 2>/dev/null | grep -Eq '^(\./)?etc/debian_version$' || return 1
-    tar -tzf "$PROOT_BASE" 2>/dev/null | grep -Eq '^(\./)?bin/(sh|dash)$' || return 1
+    tar -tzf "$PROOT_BASE" 2>/dev/null | grep -Eq '^(\./)?(bin|usr/bin)/(sh|dash)$' || return 1
     tar -tzf "$PROOT_BASE" 2>/dev/null | grep -Eq '^(\./)?usr/bin/dpkg$'
 }
 
@@ -141,12 +141,12 @@ if ! proot_base_valid; then
         --components=main \
         "$CODENAME" "$tmpdir" http://deb.debian.org/debian
 
-    # PRoot's -q mode inserts qemu-arm in front of every guest execution, so
-    # debootstrap's second stage does not depend on kernel binfmt_misc or the
-    # host ELF loader being able to map the stock ARMHF binaries directly.
+    # PRoot's -q mode inserts the host qemu-arm command in front of every guest
+    # execution, so debootstrap's second stage never depends on kernel
+    # binfmt_misc or direct loading of the stock ARMHF binaries.
     $SUDO proot \
         -S "$tmpdir" \
-        -q /usr/bin/qemu-arm \
+        -q qemu-arm \
         -w / \
         /bin/sh /debootstrap/debootstrap --second-stage
 
@@ -159,7 +159,7 @@ deb http://deb.debian.org/debian-security ${CODENAME}-security main
 deb-src http://deb.debian.org/debian-security ${CODENAME}-security main
 EOF
 
-    arch=$($SUDO proot -S "$tmpdir" -q /usr/bin/qemu-arm /usr/bin/dpkg --print-architecture)
+    arch=$($SUDO proot -S "$tmpdir" -q qemu-arm /usr/bin/dpkg --print-architecture)
     if [[ "$arch" != "$HOST_ARCH" ]]; then
         echo "PRoot base reported architecture '$arch', expected '$HOST_ARCH'" >&2
         exit 5
