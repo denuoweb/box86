@@ -27,16 +27,10 @@ if ! dpkg --print-foreign-architectures | grep -qx "$HOST_ARCH" && [[ "$(dpkg --
     $SUDO dpkg --add-architecture "$HOST_ARCH"
 fi
 
-# Test source-package resolution through the same apt-get source operation the
-# rebuilder uses. --print-uris performs resolution without downloading files.
 source_resolves() {
     apt-get --print-uris --only-source source "$1" >/dev/null 2>&1
 }
 
-# APT requires Signed-By to be identical for entries describing the same
-# repository URI/suite. Raspberry Pi OS/Debian images can use either the .pgp
-# or .gpg archive-keyring path, so inherit the path already present in the
-# machine's APT configuration instead of hard-coding one spelling.
 if [[ -z "$DEBIAN_KEYRING" ]]; then
     src_base=$(basename "$DEBIAN_SRC_FILE")
     if grep -Rhs --exclude="$src_base" \
@@ -89,6 +83,7 @@ $SUDO apt-get install -y --no-install-recommends \
     python3 \
     binutils \
     gzip \
+    tar \
     apt-utils \
     sbuild \
     debootstrap \
@@ -120,9 +115,6 @@ MSG
     exit 4
 fi
 
-# Prefer a native ARMHF build root over arm64->armhf cross-building. Debian's
-# cross dependency graph is not fully satisfiable for packages such as
-# elfutils, while this Raspberry Pi kernel/CPU can execute ARMHF directly.
 if ! arch-test "$BUILD_ARCH" >/dev/null 2>&1; then
     cat >&2 <<MSG
 The current machine/kernel cannot execute Debian $BUILD_ARCH binaries natively.
@@ -135,16 +127,24 @@ fi
 
 echo "Verified native execution support: $BUILD_ARCH"
 
-if [[ ! -f "$SBUILD_TARBALL" ]]; then
+sbuild_tarball_valid() {
+    [[ -r "$SBUILD_TARBALL" ]] || return 1
+    tar -tzf "$SBUILD_TARBALL" 2>/dev/null | grep -Eq '^(\./)?etc/debian_version$'
+}
+
+if [[ -e "$SBUILD_TARBALL" ]] && ! sbuild_tarball_valid; then
+    echo "Removing incomplete sbuild tarball: $SBUILD_TARBALL"
+    rm -f -- "$SBUILD_TARBALL"
+fi
+
+if ! sbuild_tarball_valid; then
     echo "Creating isolated native $BUILD_ARCH sbuild base: $SBUILD_TARBALL"
     mkdir -p "$(dirname "$SBUILD_TARBALL")"
     tmpdir=$(mktemp -d)
 
-    # File-type chroots normally ask sbuild-createchroot to delete the staging
-    # directory. With the unshare backend, /dev entries in a native ARMHF root
-    # can remain owned as root from the outer namespace and ordinary rm then
-    # fails with EPERM. Keep the staging tree until the tarball is complete and
-    # clean this exact mktemp directory through sudo afterwards.
+    # Keep the staging directory so sbuild-createchroot does not attempt to
+    # remove outer-namespace root-owned /dev nodes itself. Once the tarball is
+    # complete, remove only this exact mktemp tree through sudo.
     cleanup_tmpdir() {
         if [[ -n "${tmpdir:-}" && -d "$tmpdir" ]]; then
             $SUDO rm -rf --one-file-system -- "$tmpdir" || true
@@ -165,7 +165,10 @@ if [[ ! -f "$SBUILD_TARBALL" ]]; then
     trap - EXIT
 fi
 
-[[ -r "$SBUILD_TARBALL" ]] || { echo "sbuild tarball was not created: $SBUILD_TARBALL" >&2; exit 6; }
+if ! sbuild_tarball_valid; then
+    echo "sbuild tarball is missing or incomplete: $SBUILD_TARBALL" >&2
+    exit 6
+fi
 
 echo "Verified isolated native sbuild base: $SBUILD_TARBALL"
 echo "ARMHF16K build prerequisites are installed."
