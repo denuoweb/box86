@@ -1,3 +1,11 @@
+box86-16k (0.3.8+git20260807.0579f8b+16k14) unstable; urgency=medium
+
+  * Disable Proton Xalia by default in steam16k because Xalia fails to discover
+    a usable display in the current 16K Steam environment.
+  * Preserve caller overrides so PROTON_USE_XALIA can still be explicitly set.
+
+ -- DenuoWeb <5424250+denuoweb@users.noreply.github.com>  Sat, 08 Aug 2026 16:14:00 -0700
+
 box86-16k (0.3.8+git20260807.0579f8b+16k13) unstable; urgency=medium
 
   * Preserve the real libX11 thread function-pointer data globals and register
