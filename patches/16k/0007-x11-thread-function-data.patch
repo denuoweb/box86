@@ -11,9 +11,9 @@ read each native callback slot, create an x86 bridge for the native function,
 and publish the bridge address through the shadow variable. Refresh the
 shadows both for guest XInitThreads calls and for BOX86_X11THREADS startup.
 ---
- src/wrapped/wrappedlibx11.c         | 48 +++++++++++++++++++++++++++++++++++++-
- src/wrapped/wrappedlibx11_private.h | 16 ++++++-------
- 2 files changed, 56 insertions(+), 8 deletions(-)
+ src/wrapped/wrappedlibx11.c         | 52 +++++++++++++++++++++++++++++++++++++--
+ src/wrapped/wrappedlibx11_private.h | 16 ++++++++--------
+ 2 files changed, 58 insertions(+), 10 deletions(-)
 
 diff --git a/src/wrapped/wrappedlibx11.c b/src/wrapped/wrappedlibx11.c
 --- a/src/wrapped/wrappedlibx11.c
@@ -95,6 +95,7 @@ diff --git a/src/wrapped/wrappedlibx11_private.h b/src/wrapped/wrappedlibx11_pri
 --- a/src/wrapped/wrappedlibx11_private.h
 +++ b/src/wrapped/wrappedlibx11_private.h
 @@ -233,4 +233,4 @@ GOM(XCreateImage, pFEppuiipuuii)
+ GOM(XCreateImage, pFEppuiipuuii)
  GO(dummy_XCreateImage, pFppuiipuuii)    // to have the wrapper
 -DATAB(_XCreateMutex_fn, 4)
 +DATAM(_XCreateMutex_fn, 4)
@@ -127,11 +128,13 @@ diff --git a/src/wrapped/wrappedlibx11_private.h b/src/wrapped/wrappedlibx11_pri
 +DATAM(_XLockMutex_fn, 4)
  GO(XLookupColor, iFppppp)
 @@ -1026,4 +1026,4 @@ GO(XTextWidth, iFppi)
+ GO(XTextWidth, iFppi)
  GO(XTextWidth16, iFppi)
 -DATAB(_Xthread_self_fn, 4)
 +DATAM(_Xthread_self_fn, 4)
  GO(XTranslateCoordinates, iFpppiippp)
 @@ -1046,4 +1046,4 @@ GO(XUnloadFont, iFpp)
+ GO(XUnloadFont, iFpp)
  GO(XUnlockDisplay, vFp)
 -DATAB(_XUnlockMutex_fn, 4)
 +DATAM(_XUnlockMutex_fn, 4)
