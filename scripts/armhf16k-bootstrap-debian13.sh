@@ -1,13 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 HOST_ARCH=${HOST_ARCH:-armhf}
-BUILD_ARCH=${BUILD_ARCH:-$HOST_ARCH}
 SUDO=${SUDO:-sudo}
 DEBIAN_SRC_FILE=${DEBIAN_SRC_FILE:-/etc/apt/sources.list.d/armhf16k-debian-src.sources}
 DEBIAN_KEYRING=${DEBIAN_KEYRING:-}
-QEMU_BINFMT="$ROOT/scripts/armhf16k-qemu-arm-binfmt.sh"
 
 if ! command -v apt-get >/dev/null 2>&1; then
     echo "This bootstrap targets Debian/apt systems." >&2
@@ -19,7 +16,8 @@ if [[ -r /etc/os-release ]]; then
     . /etc/os-release
 fi
 CODENAME=${VERSION_CODENAME:-trixie}
-SBUILD_TARBALL=${ARMHF16K_SBUILD_TARBALL:-"$HOME/.cache/sbuild/${CODENAME}-${BUILD_ARCH}.tar.gz"}
+PROOT_BASE=${ARMHF16K_PROOT_BASE:-"$HOME/.cache/armhf16k/${CODENAME}-${HOST_ARCH}-proot.tar.gz"}
+
 if [[ "$CODENAME" != "trixie" ]]; then
     echo "Warning: expected Debian 13/trixie, detected codename '$CODENAME'." >&2
 fi
@@ -87,10 +85,8 @@ $SUDO apt-get install -y --no-install-recommends \
     gzip \
     tar \
     apt-utils \
-    sbuild \
     debootstrap \
-    mmdebstrap \
-    uidmap \
+    proot \
     qemu-user
 
 if ! source_resolves zlib; then
@@ -107,72 +103,91 @@ fi
 
 echo "Verified Debian source resolution: zlib"
 
-if ! unshare -Ur true >/dev/null 2>&1; then
-    cat >&2 <<'MSG'
-Unprivileged user namespaces are unavailable, but ARMHF16K uses sbuild's
-unshare backend to isolate build dependencies from the host system.
-Enable them and rerun bootstrap, for example:
-  sudo sysctl -w kernel.unprivileged_userns_clone=1
-MSG
-    exit 4
-fi
+command -v proot >/dev/null 2>&1 || { echo "proot is unavailable" >&2; exit 4; }
+command -v qemu-arm >/dev/null 2>&1 || { echo "qemu-arm is unavailable" >&2; exit 4; }
 
-# AArch64 normally executes ARMHF directly, so Debian intentionally does not
-# register qemu-arm through qemu-user-binfmt on arm64. On this 16K-page host,
-# however, stock Debian ARMHF bootstrap binaries can still be 4K-only ELFs and
-# fail before a native ARMHF build root can exist. ARMHF16K therefore enables a
-# private QEMU ARM binfmt only while bootstrapping/building and removes it again
-# afterwards. QEMU supplies the temporary bootstrap bridge; produced packages
-# are still native ARMHF and must pass the 16K ELF verifier.
-[[ -r "$QEMU_BINFMT" ]] || { echo "Missing QEMU binfmt helper: $QEMU_BINFMT" >&2; exit 5; }
-
-sbuild_tarball_valid() {
-    [[ -r "$SBUILD_TARBALL" ]] || return 1
-    tar -tzf "$SBUILD_TARBALL" 2>/dev/null | grep -Eq '^(\./)?etc/debian_version$'
+proot_base_valid() {
+    [[ -r "$PROOT_BASE" ]] || return 1
+    tar -tzf "$PROOT_BASE" 2>/dev/null | grep -Eq '^(\./)?etc/debian_version$' || return 1
+    tar -tzf "$PROOT_BASE" 2>/dev/null | grep -Eq '^(\./)?bin/(sh|dash)$' || return 1
+    tar -tzf "$PROOT_BASE" 2>/dev/null | grep -Eq '^(\./)?usr/bin/dpkg$'
 }
 
-if [[ -e "$SBUILD_TARBALL" ]] && ! sbuild_tarball_valid; then
-    echo "Removing incomplete sbuild tarball: $SBUILD_TARBALL"
-    rm -f -- "$SBUILD_TARBALL"
+if [[ -e "$PROOT_BASE" ]] && ! proot_base_valid; then
+    echo "Removing incomplete PRoot base: $PROOT_BASE"
+    rm -f -- "$PROOT_BASE"
 fi
 
-if ! sbuild_tarball_valid; then
-    echo "Creating isolated ARMHF sbuild base through temporary QEMU execution: $SBUILD_TARBALL"
-    mkdir -p "$(dirname "$SBUILD_TARBALL")"
+if ! proot_base_valid; then
+    echo "Creating ARMHF PRoot base: $PROOT_BASE"
+    mkdir -p "$(dirname "$PROOT_BASE")"
     tmpdir=$(mktemp -d)
-    qemu_enabled=0
 
-    cleanup_bootstrap() {
-        if [[ "$qemu_enabled" -eq 1 ]]; then
-            bash "$QEMU_BINFMT" disable || true
-            qemu_enabled=0
-        fi
+    cleanup_tmpdir() {
         if [[ -n "${tmpdir:-}" && -d "$tmpdir" ]]; then
             $SUDO rm -rf --one-file-system -- "$tmpdir" || true
         fi
     }
-    trap cleanup_bootstrap EXIT INT TERM
+    trap cleanup_tmpdir EXIT INT TERM
 
-    bash "$QEMU_BINFMT" enable
-    qemu_enabled=1
-
-    sbuild-createchroot \
-        --chroot-mode=unshare \
-        --arch="$BUILD_ARCH" \
+    # First stage only downloads and extracts ARMHF packages. It does not need
+    # to execute target binaries, which is important because stock ARMHF ELFs
+    # can be 4K-linked and rejected by this 16K-page kernel.
+    $SUDO debootstrap \
+        --foreign \
+        --arch="$HOST_ARCH" \
+        --variant=buildd \
+        --include=fakeroot,build-essential \
         --components=main \
-        --keep-sbuild-chroot-dir \
-        --make-sbuild-tarball="$SBUILD_TARBALL" \
         "$CODENAME" "$tmpdir" http://deb.debian.org/debian
 
-    cleanup_bootstrap
+    # PRoot's -q mode inserts qemu-arm in front of every guest execution, so
+    # debootstrap's second stage does not depend on kernel binfmt_misc or the
+    # host ELF loader being able to map the stock ARMHF binaries directly.
+    $SUDO proot \
+        -S "$tmpdir" \
+        -q /usr/bin/qemu-arm \
+        -w / \
+        /bin/sh /debootstrap/debootstrap --second-stage
+
+    cat <<EOF | $SUDO tee "$tmpdir/etc/apt/sources.list" >/dev/null
+deb http://deb.debian.org/debian ${CODENAME} main
+deb-src http://deb.debian.org/debian ${CODENAME} main
+deb http://deb.debian.org/debian ${CODENAME}-updates main
+deb-src http://deb.debian.org/debian ${CODENAME}-updates main
+deb http://deb.debian.org/debian-security ${CODENAME}-security main
+deb-src http://deb.debian.org/debian-security ${CODENAME}-security main
+EOF
+
+    arch=$($SUDO proot -S "$tmpdir" -q /usr/bin/qemu-arm /usr/bin/dpkg --print-architecture)
+    if [[ "$arch" != "$HOST_ARCH" ]]; then
+        echo "PRoot base reported architecture '$arch', expected '$HOST_ARCH'" >&2
+        exit 5
+    fi
+    echo "Verified PRoot guest execution: $arch via qemu-arm"
+
+    tmpbase="${PROOT_BASE}.tmp.$$"
+    $SUDO tar \
+        --numeric-owner \
+        --one-file-system \
+        --exclude='./dev/*' \
+        --exclude='./proc/*' \
+        --exclude='./sys/*' \
+        --exclude='./tmp/*' \
+        --exclude='./run/*' \
+        -C "$tmpdir" -czf "$tmpbase" .
+    $SUDO chown "$(id -u):$(id -g)" "$tmpbase"
+    mv -f "$tmpbase" "$PROOT_BASE"
+
+    cleanup_tmpdir
     tmpdir=
     trap - EXIT INT TERM
 fi
 
-if ! sbuild_tarball_valid; then
-    echo "sbuild tarball is missing or incomplete: $SBUILD_TARBALL" >&2
+if ! proot_base_valid; then
+    echo "PRoot base is missing or incomplete: $PROOT_BASE" >&2
     exit 6
 fi
 
-echo "Verified isolated ARMHF sbuild base: $SBUILD_TARBALL"
+echo "Verified ARMHF PRoot base: $PROOT_BASE"
 echo "ARMHF16K build prerequisites are installed."
