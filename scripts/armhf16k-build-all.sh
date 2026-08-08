@@ -12,7 +12,7 @@ if [[ -z "$START_AT" ]]; then
     started=1
 fi
 
-while IFS=$'\t' read -r stage source binaries; do
+while IFS=$'\t' read -r stage source targets; do
     [[ -z "$stage" || "$stage" == \#* ]] && continue
     if [[ -n "$ONLY_SOURCE" && "$source" != "$ONLY_SOURCE" ]]; then
         continue
@@ -25,13 +25,32 @@ while IFS=$'\t' read -r stage source binaries; do
     echo
     echo "============================================================"
     echo "ARMHF16K stage $stage: $source"
-    echo "Observed bad binary packages: $binaries"
+    echo "Runtime targets: $targets"
     echo "============================================================"
-    bash "$ROOT/scripts/armhf16k-rebuild-source.sh" "$source"
+
+    case "$source" in
+        zlib|libbsd|libxau|libxcb)
+            bash "$ROOT/scripts/armhf16k-rebuild-source.sh" "$source"
+            ;;
+        mesa-pi5-private)
+            bash "$ROOT/scripts/armhf16k-build-mesa-pi5.sh"
+            ;;
+        libglvnd-private)
+            bash "$ROOT/scripts/armhf16k-build-libglvnd-private.sh"
+            ;;
+        private-runtime)
+            bash "$ROOT/scripts/armhf16k-assemble-private-runtime.sh"
+            ;;
+        *)
+            echo "Unknown ARMHF16K stage: $source" >&2
+            exit 2
+            ;;
+    esac
 
     if [[ -n "$STOP_AFTER" && "$source" == "$STOP_AFTER" ]]; then
         break
     fi
 done < "$MANIFEST"
 
+# Keep the old package pool index useful for the low-level Debian rebuilds.
 bash "$ROOT/scripts/armhf16k-make-repo.sh"
