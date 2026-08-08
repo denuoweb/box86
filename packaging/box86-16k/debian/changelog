@@ -1,3 +1,14 @@
+box86-16k (0.3.8+git20260807.0579f8b+16k13) unstable; urgency=medium
+
+  * Preserve the real libX11 thread function-pointer data globals and register
+    automatic x86 bridges for all seven callbacks initialized by XInitThreads.
+  * Refresh the mappings after guest XInitThreads calls and during wrapper
+    initialization, covering BOX86_X11THREADS and libX11 constructor setup.
+  * Remove the temporary DATAM shadow copies and WATCH_X11_THREAD_BRIDGES probe
+    used to validate the original diagnosis.
+
+ -- DenuoWeb <5424250+denuoweb@users.noreply.github.com>  Sat, 08 Aug 2026 15:49:00 -0700
+
 box86-16k (0.3.8+git20260807.0579f8b+16k12) unstable; urgency=medium
 
   * Bridge libX11 thread function-pointer globals through Box86-owned DATAM
